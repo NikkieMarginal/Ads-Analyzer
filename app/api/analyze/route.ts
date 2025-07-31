@@ -48,9 +48,6 @@ async function scrapeFacebookAdsLibrary(companyName: string, websiteUrl: string,
     })
     console.log('Page loaded')
     
-    // Take a screenshot for debugging (optional)
-    // await page.screenshot({ path: '/tmp/debug.png' })
-    
     // Get page title to verify we're on the right page
     const title = await page.title()
     console.log(`Page title: ${title}`)
@@ -139,7 +136,7 @@ async function scrapeFacebookAdsLibrary(companyName: string, websiteUrl: string,
       found: true,
       activeAds: simulatedActiveAds,
       newAds: simulatedNewAds,
-      error: null
+      error: undefined
     }
     
   } catch (error) {
@@ -204,7 +201,7 @@ export async function POST(request: NextRequest) {
           activeAds: scrapingResult.activeAds,
           newAds: scrapingResult.newAds,
           found: scrapingResult.found,
-          error: scrapingResult.error
+          error: scrapingResult.error || undefined
         })
 
         // Delay between requests
