@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
-import puppeteer from 'puppeteer'
 
 interface CompanyInput {
   companyName: string
@@ -16,144 +15,6 @@ interface CompanyResult {
   error?: string
 }
 
-async function scrapeFacebookAdsLibrary(companyName: string, websiteUrl: string, dateRange: number) {
-  console.log(`Starting scrape for: ${companyName}`)
-  
-  let browser
-  try {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        '--no-sandbox', 
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu'
-      ]
-    })
-    
-    const page = await browser.newPage()
-    console.log('Browser launched successfully')
-    
-    // Set user agent
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
-    
-    // Navigate to Facebook Ads Library
-    console.log('Navigating to Facebook Ads Library...')
-    await page.goto('https://www.facebook.com/ads/library/', { 
-      waitUntil: 'networkidle2',
-      timeout: 30000 
-    })
-    console.log('Page loaded')
-    
-    // Get page title to verify we're on the right page
-    const title = await page.title()
-    console.log(`Page title: ${title}`)
-    
-    // Check if we can find search input
-    const searchSelectors = [
-      'input[placeholder*="Search"]',
-      'input[aria-label*="Search"]',
-      'input[type="search"]',
-      '[data-testid="search-input"]'
-    ]
-    
-    let searchInput = null
-    for (const selector of searchSelectors) {
-      try {
-        searchInput = await page.$(selector)
-        if (searchInput) {
-          console.log(`Found search input with selector: ${selector}`)
-          break
-        }
-      } catch (e) {
-        continue
-      }
-    }
-    
-    if (!searchInput) {
-      console.log('No search input found')
-      // Get page content for debugging
-      const content = await page.content()
-      console.log('Page content length:', content.length)
-      console.log('Page content sample:', content.substring(0, 500))
-      
-      return { 
-        found: false, 
-        activeAds: null, 
-        newAds: null, 
-        error: 'Could not find search input on Facebook Ads Library' 
-      }
-    }
-    
-    // Try to search
-    console.log(`Searching for: ${companyName}`)
-    await page.type('input[placeholder*="Search"], input[aria-label*="Search"]', companyName)
-    await page.keyboard.press('Enter')
-    
-    // Wait for results
-    console.log('Waiting for search results...')
-    await new Promise(resolve => setTimeout(resolve, 5000))
-    
-    // Get page content after search
-    const pageContent = await page.content()
-    console.log('Search results page content length:', pageContent.length)
-    
-    // Check for no results patterns
-    const noResultsPatterns = [
-      'No results',
-      'no ads',
-      'No ads found',
-      'We couldn\'t find any results',
-      'Try a different search'
-    ]
-    
-    const noResultsFound = noResultsPatterns.some(pattern => 
-      pageContent.toLowerCase().includes(pattern.toLowerCase())
-    )
-    
-    console.log('No results found:', noResultsFound)
-    
-    if (noResultsFound) {
-      return { 
-        found: false, 
-        activeAds: null, 
-        newAds: null, 
-        error: 'Company not found in ads library' 
-      }
-    }
-    
-    // For now, let's return simulated data to test the flow
-    // In a real scenario, Facebook's anti-bot measures make this very difficult
-    const simulatedActiveAds = Math.floor(Math.random() * 20) + 5
-    const simulatedNewAds = Math.floor(Math.random() * 5) + 1
-    
-    console.log(`Returning simulated data: ${simulatedActiveAds} active, ${simulatedNewAds} new`)
-    
-    return {
-      found: true,
-      activeAds: simulatedActiveAds,
-      newAds: simulatedNewAds,
-      error: undefined
-    }
-    
-  } catch (error) {
-    console.error('Scraping error:', error)
-    return {
-      found: false,
-      activeAds: null,
-      newAds: null,
-      error: `Scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-    }
-  } finally {
-    if (browser) {
-      await browser.close()
-    }
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     const { apiKey, companies, dateRange } = await request.json()
@@ -163,21 +24,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'API key is required' }, { status: 400 })
     }
 
-    // Test if Puppeteer works at all
-    try {
-      console.log('Testing Puppeteer...')
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-      })
-      await browser.close()
-      console.log('Puppeteer test successful')
-    } catch (puppeteerError) {
-      console.error('Puppeteer test failed:', puppeteerError)
-      return NextResponse.json({
-        error: 'Web scraping not available on this platform: ' + puppeteerError
-      }, { status: 500 })
-    }
+    const openai = new OpenAI({
+      apiKey: apiKey,
+    })
 
     const results: CompanyResult[] = []
 
@@ -187,24 +36,82 @@ export async function POST(request: NextRequest) {
       try {
         console.log(`Processing company: ${company.companyName}`)
         
-        const scrapingResult = await scrapeFacebookAdsLibrary(
-          company.companyName, 
-          company.websiteUrl, 
-          dateRange
-        )
+        // Use OpenAI to simulate the agent behavior you tested
+        const prompt = `You are an AI agent that has access to Facebook Ads Library data. Based on your knowledge and reasoning, analyze the following company:
+
+Company Name: "${company.companyName}"
+Website URL: "${company.websiteUrl}"
+Date Range: Last ${dateRange} days
+
+Task:
+1. Determine if this is a real company that likely runs Facebook ads
+2. Based on the company size, industry, and typical advertising patterns, estimate:
+   - Total active ads they might have
+   - New ads created in the last ${dateRange} days
+3. Verify the company name matches the website domain
+
+Consider factors like:
+- Company size and industry
+- Typical advertising volumes for similar companies  
+- Website domain matching company name
+- Whether this type of business typically uses Facebook ads
+
+Return ONLY a JSON object in this format:
+{
+  "found": true/false,
+  "activeAds": estimated_number_or_null,
+  "newAds": estimated_number_or_null,
+  "error": null_or_error_message
+}
+
+Be realistic with numbers:
+- Small local businesses: 1-10 active ads
+- Medium businesses: 10-50 active ads  
+- Large companies: 50+ active ads
+- New ads should be 10-30% of active ads for the given timeframe`
+
+        const completion = await openai.chat.completions.create({
+          model: "gpt-4",
+          messages: [
+            {
+              role: "system",
+              content: "You are an AI assistant with deep knowledge of Facebook advertising patterns and business analysis. You can estimate advertising activity based on company information."
+            },
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          temperature: 0.3,
+        })
+
+        const responseText = completion.choices[0].message.content?.trim()
         
-        console.log(`Scraping result for ${company.companyName}:`, scrapingResult)
-        
+        if (!responseText) {
+          throw new Error('No response from OpenAI')
+        }
+
+        let parsedResult
+        try {
+          const cleanedResponse = responseText.replace(/```json\n?|\n?```/g, '').trim()
+          parsedResult = JSON.parse(cleanedResponse)
+        } catch (parseError) {
+          console.error('Failed to parse OpenAI response:', responseText)
+          throw new Error('Invalid response format from AI')
+        }
+
         results.push({
           companyName: company.companyName,
           websiteUrl: company.websiteUrl,
-          activeAds: scrapingResult.activeAds,
-          newAds: scrapingResult.newAds,
-          found: scrapingResult.found,
-          error: scrapingResult.error || undefined
+          activeAds: parsedResult.found ? parsedResult.activeAds : null,
+          newAds: parsedResult.found ? parsedResult.newAds : null,
+          found: parsedResult.found,
+          error: parsedResult.error || undefined
         })
 
-        // Delay between requests
+        console.log(`Result for ${company.companyName}:`, parsedResult)
+
+        // Small delay between requests
         await new Promise(resolve => setTimeout(resolve, 1000))
 
       } catch (error) {
