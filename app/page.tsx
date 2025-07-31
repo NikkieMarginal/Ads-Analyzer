@@ -77,25 +77,29 @@ export default function HomePage() {
     }
   }
 
-  const exportToSpreadsheet = () => {
-    if (!results) return
+const exportToSpreadsheet = () => {
+  if (!results) return
 
-    const exportData = results.companies.map(company => ({
+  const exportData = results.companies.map(company => {
+    const newAdsColumnName = `New Ads (Last ${results.dateRange} Days)`
+    
+    return {
       'Company Name': company.companyName,
       'Website URL': company.websiteUrl,
       'Found in Ads Library': company.found ? 'Yes' : 'No',
       'Active Ads': company.found ? company.activeAds : 'N/A',
-      'New Ads (Last ' + results.dateRange + ' Days)': company.found ? company.newAds : 'N/A',
+      [newAdsColumnName]: company.found ? company.newAds : 'N/A',
       'Error': company.error || ''
-    }))
+    }
+  })
 
-    const worksheet = XLSX.utils.json_to_sheet(exportData)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Facebook Ads Analysis')
-    
-    const fileName = `facebook-ads-analysis-${new Date().toISOString().split('T')[0]}.xlsx`
-    XLSX.writeFile(workbook, fileName)
-  }
+  const worksheet = XLSX.utils.json_to_sheet(exportData)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Facebook Ads Analysis')
+  
+  const fileName = `facebook-ads-analysis-${new Date().toISOString().split('T')[0]}.xlsx`
+  XLSX.writeFile(workbook, fileName)
+}
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
