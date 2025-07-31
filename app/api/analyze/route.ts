@@ -75,16 +75,23 @@ Estimation rules:
 
         let parsedResult
         try {
-          // More aggressive cleaning of the response
+          // More aggressive cleaning of the response (fixed regex)
           let cleanedResponse = responseText
             .replace(/```json\n?|\n?```/g, '')
             .replace(/```\n?|\n?```/g, '')
-            .replace(/^[^{]*({.*})[^}]*$/s, '$1')
             .trim()
+
+          // Find JSON object in the response
+          const jsonStart = cleanedResponse.indexOf('{')
+          const jsonEnd = cleanedResponse.lastIndexOf('}')
+          
+          if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+            cleanedResponse = cleanedResponse.substring(jsonStart, jsonEnd + 1)
+          }
 
           // If response doesn't start with {, try to extract JSON
           if (!cleanedResponse.startsWith('{')) {
-            const jsonMatch = cleanedResponse.match(/\{[^}]*\}/s)
+            const jsonMatch = cleanedResponse.match(/\{[^}]*\}/)
             if (jsonMatch) {
               cleanedResponse = jsonMatch[0]
             } else {
