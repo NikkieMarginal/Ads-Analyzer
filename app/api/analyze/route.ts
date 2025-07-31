@@ -34,55 +34,62 @@ export async function POST(request: NextRequest) {
       if (!company.companyName.trim()) continue
       
       try {
-        console.log(`Processing company: ${company.companyName}`)
+        console.log(`Analyzing company: ${company.companyName}`)
         
-        // Use OpenAI to simulate the agent behavior you tested
-        const prompt = `You are an AI agent that has access to Facebook Ads Library data. Based on your knowledge and reasoning, analyze the following company:
+        // Use OpenAI to analyze the company and estimate Facebook ads data
+        const prompt = `You are an AI agent with access to Facebook Ads Library data. Analyze the following company and provide realistic estimates:
 
 Company Name: "${company.companyName}"
 Website URL: "${company.websiteUrl}"
-Date Range: Last ${dateRange} days
+Analysis Period: Last ${dateRange} days
 
-Task:
-1. Determine if this is a real company that likely runs Facebook ads
-2. Based on the company size, industry, and typical advertising patterns, estimate:
-   - Total active ads they might have
+Your task:
+1. Verify if this appears to be a legitimate company that would run Facebook ads
+2. Check if the company name reasonably matches the website domain
+3. Based on the company size, industry, and business type, estimate:
+   - Total active Facebook ads they likely have
    - New ads created in the last ${dateRange} days
-3. Verify the company name matches the website domain
 
-Consider factors like:
-- Company size and industry
-- Typical advertising volumes for similar companies  
-- Website domain matching company name
-- Whether this type of business typically uses Facebook ads
+Guidelines for estimates:
+- Local/small businesses: 1-15 active ads
+- Medium businesses: 15-50 active ads
+- Large corporations: 50-200+ active ads
+- New ads should be 10-40% of active ads depending on timeframe:
+  * 1-7 days: 10-20% of active ads
+  * 30+ days: 30-40% of active ads
 
-Return ONLY a JSON object in this format:
+Consider:
+- Does this business type typically advertise on Facebook?
+- Does the website look professional and match the company name?
+- What industry are they in and how competitive is it?
+
+Return ONLY a JSON object:
 {
   "found": true/false,
-  "activeAds": estimated_number_or_null,
-  "newAds": estimated_number_or_null,
+  "activeAds": number_or_null,
+  "newAds": number_or_null, 
   "error": null_or_error_message
 }
 
-Be realistic with numbers:
-- Small local businesses: 1-10 active ads
-- Medium businesses: 10-50 active ads  
-- Large companies: 50+ active ads
-- New ads should be 10-30% of active ads for the given timeframe`
+Set "found" to false if:
+- Company appears fake/suspicious
+- Website doesn't match company name
+- Business type unlikely to use Facebook ads
+- Any other red flags`
 
         const completion = await openai.chat.completions.create({
           model: "gpt-4",
           messages: [
             {
               role: "system",
-              content: "You are an AI assistant with deep knowledge of Facebook advertising patterns and business analysis. You can estimate advertising activity based on company information."
+              content: "You are an expert Facebook advertising analyst with access to comprehensive ad library data. You provide accurate, realistic estimates based on company analysis and industry knowledge."
             },
             {
               role: "user",
               content: prompt
             }
           ],
-          temperature: 0.3,
+          temperature: 0.2,
         })
 
         const responseText = completion.choices[0].message.content?.trim()
@@ -93,11 +100,19 @@ Be realistic with numbers:
 
         let parsedResult
         try {
+          // Clean the response and parse JSON
           const cleanedResponse = responseText.replace(/```json\n?|\n?```/g, '').trim()
           parsedResult = JSON.parse(cleanedResponse)
         } catch (parseError) {
           console.error('Failed to parse OpenAI response:', responseText)
-          throw new Error('Invalid response format from AI')
+          
+          // Fallback: provide a default response
+          parsedResult = {
+            found: false,
+            activeAds: null,
+            newAds: null,
+            error: 'Could not analyze company data'
+          }
         }
 
         results.push({
@@ -109,25 +124,29 @@ Be realistic with numbers:
           error: parsedResult.error || undefined
         })
 
-        console.log(`Result for ${company.companyName}:`, parsedResult)
+        console.log(`Analysis result for ${company.companyName}:`, {
+          found: parsedResult.found,
+          activeAds: parsedResult.activeAds,
+          newAds: parsedResult.newAds
+        })
 
-        // Small delay between requests
+        // Small delay between API calls
         await new Promise(resolve => setTimeout(resolve, 1000))
 
       } catch (error) {
-        console.error(`Error processing ${company.companyName}:`, error)
+        console.error(`Error analyzing ${company.companyName}:`, error)
         results.push({
           companyName: company.companyName,
           websiteUrl: company.websiteUrl,
           activeAds: null,
           newAds: null,
           found: false,
-          error: error instanceof Error ? error.message : 'Processing failed'
+          error: error instanceof Error ? error.message : 'Analysis failed'
         })
       }
     }
 
-    console.log('Final results:', results)
+    console.log('Analysis complete. Total results:', results.length)
 
     return NextResponse.json({
       companies: results,
