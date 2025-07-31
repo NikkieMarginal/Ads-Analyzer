@@ -14,7 +14,8 @@
     "react-dom": "^18",
     "openai": "^4.20.1",
     "xlsx": "^0.18.5",
-    "lucide-react": "^0.294.0"
+    "lucide-react": "^0.294.0",
+    "axios": "^1.6.0"
   },
   "devDependencies": {
     "typescript": "^5",
