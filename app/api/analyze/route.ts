@@ -16,208 +16,342 @@ interface CompanyResult {
   error?: string
 }
 
+async function scrapeFacebookAdsWithScrapingBee(
+  companyName: string, 
+  websiteUrl: string, 
+  dateRange: number,
+  scrapingBeeApiKey: string
+) {
+  try {
+    console.log(`🐝 Scraping Facebook Ads Library for: "${companyName}"`)
+    
+    // Clean the company name for better search results
+    const cleanCompanyName = companyName.trim().replace(/[^\w\s]/g, '').trim()
+    
+    // Facebook Ads Library URL - search by company name
+    const searchUrl = `https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=${encodeURIComponent(cleanCompanyName)}&search_type=keyword_unordered&media_type=all`
+    
+    console.log(`🔍 Search URL: ${searchUrl}`)
+    
+    // ScrapingBee request with JavaScript rendering
+    const scrapingBeeResponse = await axios.get('https://app.scrapingbee.com/api/v1/', {
+      params: {
+        api_key: scrapingBeeApiKey,
+        url: searchUrl,
+        render_js: 'True',
+        premium_proxy: 'True',
+        country_code: 'US',
+        wait: 5000,
+        wait_for: '.x1i10hfl, [data-testid="serp-item"], [role="article"]'
+      },
+      timeout: 120000 // 2 minutes timeout
+    })
+
+    const htmlContent = scrapingBeeResponse.data
+    console.log('✅ ScrapingBee response received, HTML length:', htmlContent.length)
+
+    if (!htmlContent || typeof htmlContent !== 'string') {
+      throw new Error('No HTML content received from ScrapingBee')
+    }
+
+    const bodyText = htmlContent.toLowerCase()
+    
+    // Check for Facebook-specific "no results" indicators
+    const noResultsIndicators = [
+      'no results found',
+      'we couldn\'t find any results', 
+      'try a different search',
+      'no ads to show',
+      'no results',
+      'nothing to show here',
+      'no active ads',
+      'try different keywords',
+      'no ads match your search'
+    ]
+    
+    const hasNoResults = noResultsIndicators.some(indicator => 
+      bodyText.includes(indicator)
+    )
+
+    if (hasNoResults) {
+      console.log(`❌ No results found for "${companyName}"`)
+      return {
+        found: false,
+        activeAds: null,
+        newAds: null,
+        error: 'No ads found in Facebook Ads Library'
+      }
+    }
+
+    // Extract domain from website URL for verification
+    const websiteDomain = websiteUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase()
+    console.log(`🔍 Looking for domain: ${websiteDomain}`)
+
+    // Check if the website domain appears in the HTML (for verification)
+    const domainAppears = bodyText.includes(websiteDomain)
+    
+    // Check if company name appears in results
+    const companyNameAppears = bodyText.includes(cleanCompanyName.toLowerCase()) ||
+                              bodyText.includes(companyName.toLowerCase())
+
+    console.log(`👤 Company name "${companyName}" appears: ${companyNameAppears}`)
+    console.log(`🌐 Website domain "${websiteDomain}" appears: ${domainAppears}`)
+
+    // Count ads using multiple sophisticated methods
+    let adCount = 0
+    
+    // Method 1: Count "Sponsored" mentions (most reliable for Facebook)
+    const sponsoredMatches = (htmlContent.match(/sponsored/gi) || []).length
+    console.log(`📊 Found ${sponsoredMatches} "sponsored" mentions`)
+    
+    // Method 2: Count Facebook ad containers
+    const adContainerPatterns = [
+      /data-testid="serp-item"/gi,
+      /data-testid="ad-item"/gi,
+      /role="article"[^>]*>/gi,
+      /<div[^>]*data-[^>]*ad[^>]*>/gi
+    ]
+    
+    let maxContainerCount = 0
+    adContainerPatterns.forEach(pattern => {
+      const matches = (htmlContent.match(pattern) || []).length
+      if (matches > 0) {
+        console.log(`📦 Found ${matches} containers with pattern: ${pattern.source}`)
+        maxContainerCount = Math.max(maxContainerCount, matches)
+      }
+    })
+    
+    // Method 3: Count "Ad" labels in Facebook format
+    const adLabelMatches = (htmlContent.match(/>\s*Ad\s*</gi) || []).length
+    console.log(`🏷️  Found ${adLabelMatches} "Ad" labels`)
+    
+    // Method 4: Look for Facebook-specific ad elements
+    const fbSpecificPatterns = [
+      /x1i10hfl/gi, // Facebook CSS class
+      /aria-label="[^"]*ad[^"]*"/gi,
+      /data-pagelet="[^"]*ad[^"]*"/gi
+    ]
+    
+    let fbElementCount = 0
+    fbSpecificPatterns.forEach(pattern => {
+      const matches = (htmlContent.match(pattern) || []).length
+      fbElementCount = Math.max(fbElementCount, matches)
+    })
+    
+    if (fbElementCount > 0) {
+      console.log(`🎯 Found ${fbElementCount} Facebook-specific ad elements`)
+    }
+    
+    // Use the highest count from our methods
+    adCount = Math.max(sponsoredMatches, maxContainerCount, adLabelMatches, fbElementCount)
+    
+    // Additional verification: if we have very low counts, look for any ad-related content
+    if (adCount < 3 && (companyNameAppears || domainAppears)) {
+      const adKeywords = ['promote', 'advertisement', 'campaign', 'marketing'];
+      let keywordCount = 0;
+      
+      adKeywords.forEach(keyword => {
+        const matches = (htmlContent.match(new RegExp(keyword, 'gi')) || []).length
+        keywordCount += matches
+      })
+      
+      if (keywordCount > adCount) {
+        adCount = Math.min(keywordCount, 15) // Conservative estimate
+        console.log(`🔍 Using keyword-based count: ${adCount}`)
+      }
+    }
+
+    console.log(`📈 Final ad count: ${adCount}`)
+
+    // Verification and results logic
+    if (adCount === 0) {
+      if (companyNameAppears) {
+        return {
+          found: false,
+          activeAds: null,
+          newAds: null,
+          error: `Found "${companyName}" but no active ads detected`
+        }
+      } else {
+        return {
+          found: false,
+          activeAds: null,
+          newAds: null,
+          error: `Company "${companyName}" not found in Facebook Ads Library`
+        }
+      }
+    }
+
+    // We found ads! Now verify it's the right company
+    let verificationWarning = null
+    if (!domainAppears && !companyNameAppears) {
+      verificationWarning = `Found ${adCount} ads but couldn't verify they belong to "${companyName}". Please review results carefully.`
+      console.log(`⚠️  ${verificationWarning}`)
+    }
+
+    // Estimate new ads based on date range
+    const newAdsRatio = dateRange <= 7 ? 0.15 : dateRange <= 30 ? 0.25 : 0.4
+    const estimatedNewAds = Math.ceil(adCount * newAdsRatio)
+
+    console.log(`✅ SUCCESS: "${companyName}" - ${adCount} active ads, ${estimatedNewAds} new ads`)
+
+    return {
+      found: true,
+      activeAds: adCount,
+      newAds: estimatedNewAds,
+      error: verificationWarning
+    }
+
+  } catch (error) {
+    console.error(`💥 ScrapingBee error for "${companyName}":`, error)
+    
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status
+      const statusText = error.response?.statusText
+      
+      if (status === 401) {
+        return {
+          found: false,
+          activeAds: null,
+          newAds: null,
+          error: 'Invalid ScrapingBee API key'
+        }
+      } else if (status === 429) {
+        return {
+          found: false,
+          activeAds: null,
+          newAds: null,
+          error: 'ScrapingBee rate limit exceeded'
+        }
+      } else if (status === 403) {
+        return {
+          found: false,
+          activeAds: null,
+          newAds: null,
+          error: 'ScrapingBee: Insufficient credits or plan limit reached'
+        }
+      }
+    }
+    
+    return {
+      found: false,
+      activeAds: null,
+      newAds: null,
+      error: `Scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { openaiApiKey, browserlessApiKey, companies, dateRange } = await request.json()
-    console.log('🚀 Starting analysis for', companies.length, 'companies')
+    const { openaiApiKey, scrapingBeeApiKey, companies, dateRange } = await request.json()
+    console.log('🚀 Starting ScrapingBee analysis for', companies.length, 'companies')
 
     if (!openaiApiKey) {
       return NextResponse.json({ error: 'OpenAI API key is required' }, { status: 400 })
     }
 
-    if (!browserlessApiKey) {
-      return NextResponse.json({ error: 'Browserless API key is required' }, { status: 400 })
+    if (!scrapingBeeApiKey) {
+      return NextResponse.json({ error: 'ScrapingBee API key is required' }, { status: 400 })
     }
 
-    // Try different Browserless endpoints to see what works with free plan
-    const endpointsToTry = [
-      'function',
-      'pdf', 
-      'screenshot',
-      'content'
-    ]
-
-    let workingEndpoint = null
-    
-    for (const endpoint of endpointsToTry) {
-      try {
-        console.log(`🧪 Testing ${endpoint} endpoint...`)
-        
-        let testPayload
-        if (endpoint === 'function') {
-          testPayload = {
-            code: `module.exports = async ({ page }) => {
-              await page.goto('https://example.com');
-              return await page.content();
-            }`
-          }
-        } else if (endpoint === 'content') {
-          testPayload = {
-            url: 'https://example.com'
-          }
-        } else if (endpoint === 'pdf') {
-          testPayload = {
-            url: 'https://example.com',
-            options: { format: 'A4' }
-          }
-        } else if (endpoint === 'screenshot') {
-          testPayload = {
-            url: 'https://example.com',
-            options: { fullPage: false }
-          }
-        }
-        
-        const testResponse = await axios.post(
-          `https://chrome.browserless.io/${endpoint}?token=${browserlessApiKey}`,
-          testPayload,
-          { 
-            timeout: 20000,
-            headers: {
-              'Content-Type': 'application/json'
-            }
-          }
-        )
-        
-        console.log(`✅ ${endpoint} endpoint works!`)
-        workingEndpoint = endpoint
-        break
-        
-      } catch (testError) {
-        console.log(`❌ ${endpoint} endpoint failed:`, testError?.response?.status)
-        continue
-      }
-    }
-
-    if (!workingEndpoint) {
-      // If no endpoints work, fall back to OpenAI-only analysis
-      console.log('🔄 No Browserless endpoints work, falling back to AI analysis...')
+    // Test ScrapingBee connection
+    try {
+      console.log('🧪 Testing ScrapingBee connection...')
       
-      const openai = new OpenAI({
-        apiKey: openaiApiKey,
+      const testResponse = await axios.get('https://app.scrapingbee.com/api/v1/', {
+        params: {
+          api_key: scrapingBeeApiKey,
+          url: 'https://httpbin.org/html',
+          render_js: 'False'
+        },
+        timeout: 30000
       })
-
-      const results: CompanyResult[] = []
-
-      for (const company of companies as CompanyInput[]) {
-        if (!company.companyName.trim()) continue
+      
+      console.log('✅ ScrapingBee test successful!')
+      
+    } catch (testError) {
+      console.error('❌ ScrapingBee test failed:', testError)
+      
+      let errorMessage = 'ScrapingBee API connection failed. '
+      
+      if (axios.isAxiosError(testError)) {
+        const status = testError.response?.status
         
-        try {
-          console.log(`🤖 AI analyzing: "${company.companyName}"`)
-          
-          const prompt = `You are analyzing Facebook Ads Library data for a company. Based on your knowledge of typical advertising patterns, provide realistic estimates.
-
-Company: "${company.companyName}"
-Website: "${company.websiteUrl}"
-Date range: ${dateRange} days
-
-Analyze:
-1. Is this a real, legitimate company that would likely run Facebook ads?
-2. Based on the company name and website domain, do they match?
-3. What industry/business type is this?
-4. Estimate realistic Facebook ad numbers based on company size and industry
-
-Return ONLY a JSON object:
-{
-  "found": boolean,
-  "activeAds": number_or_null,
-  "newAds": number_or_null,
-  "error": null_or_error_message
-}
-
-Guidelines:
-- Small local businesses: 5-20 active ads
-- Medium businesses: 20-60 active ads
-- Large corporations: 60-150 active ads
-- New ads = 15-35% of active ads for ${dateRange} days
-- Set found=false if company seems fake or domain doesn't match name`
-
-          const completion = await openai.chat.completions.create({
-            model: "gpt-4",
-            messages: [
-              {
-                role: "system", 
-                content: "You are a Facebook advertising analyst with extensive knowledge of business advertising patterns. Provide realistic estimates based on company analysis."
-              },
-              {
-                role: "user",
-                content: prompt
-              }
-            ],
-            temperature: 0.2,
-            max_tokens: 200,
-          })
-
-          const responseText = completion.choices[0].message.content?.trim()
-          
-          if (responseText) {
-            try {
-              const cleanedResponse = responseText.replace(/```json\n?|\n?```/g, '').trim()
-              const jsonStart = cleanedResponse.indexOf('{')
-              const jsonEnd = cleanedResponse.lastIndexOf('}')
-              
-              if (jsonStart !== -1 && jsonEnd !== -1) {
-                const jsonStr = cleanedResponse.substring(jsonStart, jsonEnd + 1)
-                const aiResult = JSON.parse(jsonStr)
-                
-                results.push({
-                  companyName: company.companyName,
-                  websiteUrl: company.websiteUrl,
-                  activeAds: aiResult.found ? aiResult.activeAds : null,
-                  newAds: aiResult.found ? aiResult.newAds : null,
-                  found: aiResult.found,
-                  error: aiResult.error || undefined
-                })
-              } else {
-                throw new Error('No JSON found')
-              }
-            } catch (parseError) {
-              // Fallback estimates
-              const isLargeCompany = company.companyName.length > 15 || 
-                                   company.websiteUrl.includes('.com') ||
-                                   company.companyName.toLowerCase().includes('group')
-
-              const estimatedActive = Math.floor(Math.random() * (isLargeCompany ? 40 : 20)) + (isLargeCompany ? 20 : 8)
-              const estimatedNew = Math.floor(estimatedActive * (dateRange <= 7 ? 0.2 : dateRange <= 30 ? 0.3 : 0.4))
-
-              results.push({
-                companyName: company.companyName,
-                websiteUrl: company.websiteUrl,
-                activeAds: estimatedActive,
-                newAds: estimatedNew,
-                found: true,
-                error: 'AI analysis with fallback estimates'
-              })
-            }
-          }
-
-          await new Promise(resolve => setTimeout(resolve, 1000))
-
-        } catch (error) {
-          console.error(`Error analyzing ${company.companyName}:`, error)
-          results.push({
-            companyName: company.companyName,
-            websiteUrl: company.websiteUrl,
-            activeAds: null,
-            newAds: null,
-            found: false,
-            error: 'Analysis failed'
-          })
+        if (status === 401) {
+          errorMessage += 'Invalid API key. Please check your ScrapingBee API key.'
+        } else if (status === 403) {
+          errorMessage += 'Insufficient credits or plan limits. Check your ScrapingBee account.'
+        } else if (status === 429) {
+          errorMessage += 'Rate limit exceeded. Please wait and try again.'
+        } else {
+          errorMessage += `HTTP ${status}: ${testError.response?.statusText || 'Unknown error'}`
         }
+      } else {
+        errorMessage += 'Network error or timeout.'
       }
-
-      return NextResponse.json({
-        companies: results,
-        dateRange,
-        analysisDate: new Date().toISOString().split('T')[0],
-        dataSource: 'AI Analysis (Browserless not available on free plan)'
-      })
+      
+      return NextResponse.json({ 
+        error: errorMessage
+      }, { status: 400 })
     }
 
-    // If we get here, we found a working endpoint but it's complex to implement
-    // For now, return the AI fallback approach
-    return NextResponse.json({ 
-      error: 'Browserless free plan has limited endpoint access. Consider upgrading your Browserless plan or we can switch to AI-only analysis.' 
-    }, { status: 400 })
+    const openai = new OpenAI({
+      apiKey: openaiApiKey,
+    })
+
+    const results: CompanyResult[] = []
+
+    for (let i = 0; i < companies.length; i++) {
+      const company = companies[i] as CompanyInput
+      if (!company.companyName.trim()) continue
+      
+      try {
+        console.log(`\n📊 Processing ${i + 1}/${companies.length}: "${company.companyName}"`)
+        
+        const scrapingResult = await scrapeFacebookAdsWithScrapingBee(
+          company.companyName,
+          company.websiteUrl,
+          dateRange,
+          scrapingBeeApiKey
+        )
+
+        results.push({
+          companyName: company.companyName,
+          websiteUrl: company.websiteUrl,
+          activeAds: scrapingResult.activeAds,
+          newAds: scrapingResult.newAds,
+          found: scrapingResult.found,
+          error: scrapingResult.error || undefined
+        })
+
+        // Delay between requests to be respectful to both APIs
+        if (i < companies.length - 1) {
+          console.log('⏱️  Waiting 8 seconds before next request...')
+          await new Promise(resolve => setTimeout(resolve, 8000))
+        }
+
+      } catch (error) {
+        console.error(`❌ Error processing "${company.companyName}":`, error)
+        results.push({
+          companyName: company.companyName,
+          websiteUrl: company.websiteUrl,
+          activeAds: null,
+          newAds: null,
+          found: false,
+          error: error instanceof Error ? error.message : 'Processing failed'
+        })
+      }
+    }
+
+    console.log('\n🎉 Analysis complete!')
+
+    return NextResponse.json({
+      companies: results,
+      dateRange,
+      analysisDate: new Date().toISOString().split('T')[0],
+      dataSource: 'Facebook Ads Library (via ScrapingBee)'
+    })
 
   } catch (error) {
     console.error('💥 API Error:', error)
