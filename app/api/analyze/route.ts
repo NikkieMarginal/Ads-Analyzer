@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import axios from 'axios'
-import * as cheerio from 'cheerio'
 
 interface CompanyInput {
   companyName: string
@@ -63,20 +62,20 @@ async function scrapeFacebookAdsWithBrowserless(
       throw new Error('No HTML content received from Browserless')
     }
 
-    // Parse HTML with Cheerio
-    const $ = cheerio.load(scrapedData[0].html)
+    const htmlContent = scrapedData[0].html
+    const bodyText = htmlContent.toLowerCase()
     
-    // Check for "no results" indicators
+    // Check for "no results" indicators using string methods
     const noResultsIndicators = [
-      'No results found',
-      'We couldn\'t find any results',
-      'Try a different search',
-      'No ads to show'
+      'no results found',
+      'we couldn\'t find any results',
+      'try a different search',
+      'no ads to show',
+      'no results'
     ]
     
-    const bodyText = $('body').text().toLowerCase()
     const hasNoResults = noResultsIndicators.some(indicator => 
-      bodyText.includes(indicator.toLowerCase())
+      bodyText.includes(indicator)
     )
 
     if (hasNoResults) {
@@ -89,33 +88,47 @@ async function scrapeFacebookAdsWithBrowserless(
       }
     }
 
-    // Count ads using multiple selectors
-    const adSelectors = [
-      '[data-testid="serp-item"]',
-      '[data-testid="ad-card"]', 
-      '[role="article"]',
-      '.x1i10hfl',
-      'div[data-pagelet*="ad"]'
+    // Count ads using regex patterns instead of cheerio
+    let adCount = 0
+    
+    // Try different patterns to count ads
+    const adPatterns = [
+      /data-testid="serp-item"/g,
+      /data-testid="ad-card"/g,
+      /role="article"/g,
+      /sponsored/gi,
+      /ad by/gi
     ]
 
-    let adCount = 0
-    for (const selector of adSelectors) {
-      const elements = $(selector)
-      if (elements.length > 0) {
-        adCount = elements.length
-        console.log(`Found ${adCount} ads using selector: ${selector}`)
+    for (const pattern of adPatterns) {
+      const matches = htmlContent.match(pattern)
+      if (matches && matches.length > 0) {
+        adCount = matches.length
+        console.log(`Found ${adCount} ads using pattern: ${pattern}`)
         break
       }
     }
 
-    // If no specific ad selectors worked, try counting sponsored content
+    // If no patterns worked, try counting common Facebook ad elements
     if (adCount === 0) {
-      const sponsoredElements = $('*:contains("Sponsored"), *:contains("Ad by")').length
-      adCount = Math.min(sponsoredElements, 100) // Cap at reasonable number
-      console.log(`Found ${adCount} sponsored elements`)
+      // Look for Facebook-specific ad indicators
+      const fbAdPatterns = [
+        /class="[^"]*x1i10hfl[^"]*"/g,
+        /data-pagelet[^>]*ad[^>]*/gi,
+        /<div[^>]*data-[^>]*ad[^>]*>/gi
+      ]
+      
+      for (const pattern of fbAdPatterns) {
+        const matches = htmlContent.match(pattern)
+        if (matches && matches.length > 0) {
+          adCount = Math.min(matches.length, 100) // Cap at reasonable number
+          console.log(`Found ${adCount} potential ads using FB pattern`)
+          break
+        }
+      }
     }
 
-    // Verify company name appears in results (basic verification)
+    // Verify company name appears in results
     const companyNameAppears = bodyText.includes(companyName.toLowerCase())
     
     if (!companyNameAppears && adCount === 0) {
@@ -125,6 +138,13 @@ async function scrapeFacebookAdsWithBrowserless(
         newAds: null,
         error: 'Company name not found in search results'
       }
+    }
+
+    // If we still have no ads but company name appears, estimate based on presence
+    if (adCount === 0 && companyNameAppears) {
+      // Look for any mention of ads or sponsored content
+      const adMentions = (htmlContent.match(/sponsored|advertisement|promote/gi) || []).length
+      adCount = Math.min(adMentions, 20) // Conservative estimate
     }
 
     // Estimate new ads based on date range and total ads
