@@ -62,7 +62,7 @@ function extractSocialHandles(facebookUrl: string): string[] {
     
     handles.push(...instagramVariations)
     
-    // Remove duplicates and empty strings
+    // Remove duplicates and empty strings - FIXED: using Array.from instead of spread
     const uniqueHandles = Array.from(new Set(handles)).filter(h => h && h.length > 2)
     
     console.log(`📘 Generated handle variations for verification:`, uniqueHandles)
@@ -191,7 +191,7 @@ async function scrapeFacebookAdsWithScrapingBee(
     console.log(`🌐 Website domain appears: ${domainAppears}`)
     console.log(`📘 Social handle verified: ${socialHandleVerified} ${matchedHandle ? `(@${matchedHandle})` : ''}`)
 
-  // Balanced ad counting - multiple methods with verification
+    // Balanced ad counting - multiple methods with verification
     let adCount = 0
     let verificationLevel = 'none'
     
@@ -329,16 +329,7 @@ async function scrapeFacebookAdsWithScrapingBee(
       }
     }
 
-    // If we have very low verification but high ad count, cap it more aggressively
-    if (!socialHandleVerified && !domainAppears && adCount > 10) {
-      adCount = Math.min(adCount, 10)
-      console.log(`⚠️  Limited ad count to ${adCount} due to low verification confidence`)
-    }
-
-    const newAdsRatio = dateRange <= 7 ? 0.15 : dateRange <= 30 ? 0.25 : 0.4
-    const estimatedNewAds = Math.ceil(adCount * newAdsRatio)
-
- // Success case with enhanced verification status
+    // Success case with enhanced verification status
     const newAdsRatio = dateRange <= 7 ? 0.15 : dateRange <= 30 ? 0.25 : 0.4
     const estimatedNewAds = Math.ceil(adCount * newAdsRatio)
 
@@ -414,6 +405,47 @@ export async function POST(request: NextRequest) {
 
     if (!scrapingBeeApiKey) {
       return NextResponse.json({ error: 'ScrapingBee API key is required' }, { status: 400 })
+    }
+
+    // Test ScrapingBee connection
+    try {
+      console.log('🧪 Testing ScrapingBee connection...')
+      
+      const testResponse = await axios.get('https://app.scrapingbee.com/api/v1/', {
+        params: {
+          api_key: scrapingBeeApiKey,
+          url: 'https://httpbin.org/html',
+          render_js: 'False'
+        },
+        timeout: 30000
+      })
+      
+      console.log('✅ ScrapingBee test successful!')
+      
+    } catch (testError) {
+      console.error('❌ ScrapingBee test failed:', testError)
+      
+      let errorMessage = 'ScrapingBee API connection failed. '
+      
+      if (axios.isAxiosError(testError)) {
+        const status = testError.response?.status
+        
+        if (status === 401) {
+          errorMessage += 'Invalid API key. Please check your ScrapingBee API key.'
+        } else if (status === 403) {
+          errorMessage += 'Insufficient credits or plan limits. Check your ScrapingBee account.'
+        } else if (status === 429) {
+          errorMessage += 'Rate limit exceeded. Please wait and try again.'
+        } else {
+          errorMessage += `HTTP ${status}: ${testError.response?.statusText || 'Unknown error'}`
+        }
+      } else {
+        errorMessage += 'Network error or timeout.'
+      }
+      
+      return NextResponse.json({ 
+        error: errorMessage
+      }, { status: 400 })
     }
 
     const results: CompanyResult[] = []
