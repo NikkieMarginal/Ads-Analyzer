@@ -63,7 +63,7 @@ function extractSocialHandles(facebookUrl: string): string[] {
     handles.push(...instagramVariations)
     
     // Remove duplicates and empty strings
-    const uniqueHandles = [...new Set(handles)].filter(h => h && h.length > 2)
+    const uniqueHandles = Array.from(new Set(handles)).filter(h => h && h.length > 2)
     
     console.log(`📘 Generated handle variations for verification:`, uniqueHandles)
     return uniqueHandles
