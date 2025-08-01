@@ -1,12 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Download, Calendar, Globe, Building2, Key } from 'lucide-react'
+import { Search, Download, Calendar, Globe, Building2, Key, Facebook } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
 interface CompanyData {
   companyName: string
   websiteUrl: string
+  facebookUrl: string
   activeAds: number | null
   newAds: number | null
   found: boolean
@@ -24,15 +25,15 @@ export default function HomePage() {
   const [openaiApiKey, setOpenaiApiKey] = useState('')
   const [scrapingBeeApiKey, setScrapingBeeApiKey] = useState('')
   const [companies, setCompanies] = useState([
-    { companyName: '', websiteUrl: '' },
-    { companyName: '', websiteUrl: '' },
-    { companyName: '', websiteUrl: '' }
+    { companyName: '', websiteUrl: '', facebookUrl: '' },
+    { companyName: '', websiteUrl: '', facebookUrl: '' },
+    { companyName: '', websiteUrl: '', facebookUrl: '' }
   ])
   const [dateRange, setDateRange] = useState(7)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [results, setResults] = useState<AnalysisResults | null>(null)
 
-  const handleCompanyChange = (index: number, field: 'companyName' | 'websiteUrl', value: string) => {
+  const handleCompanyChange = (index: number, field: 'companyName' | 'websiteUrl' | 'facebookUrl', value: string) => {
     const newCompanies = [...companies]
     newCompanies[index][field] = value
     setCompanies(newCompanies)
@@ -95,6 +96,7 @@ export default function HomePage() {
       return {
         'Company Name': company.companyName,
         'Website URL': company.websiteUrl,
+        'Facebook Page': company.facebookUrl || 'Not provided',
         'Found in Ads Library': company.found ? 'Yes' : 'No',
         'Active Ads': company.found ? company.activeAds : 'N/A',
         [newAdsColumnName]: company.found ? company.newAds : 'N/A',
@@ -111,14 +113,14 @@ export default function HomePage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-4xl">
+    <div className="container mx-auto px-4 py-8 max-w-5xl">
       <div className="bg-white rounded-xl shadow-lg p-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">
             Facebook Ads Library Analyzer
           </h1>
           <p className="text-gray-600">
-            Real-time Facebook Ads analysis using advanced web scraping
+            Precise Facebook Ads analysis with company verification
           </p>
         </div>
 
@@ -170,15 +172,6 @@ export default function HomePage() {
               • OpenAI: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline">platform.openai.com/api-keys</a>
               <br />
               • ScrapingBee: <a href="https://app.scrapingbee.com/account/register" target="_blank" rel="noopener noreferrer" className="underline">app.scrapingbee.com/account/register</a> (1000 requests/month free)
-              <br />
-              <br />
-              <strong>ScrapingBee Benefits:</strong>
-              <br />
-              ✅ 1000 free API calls/month
-              <br />
-              ✅ JavaScript rendering for complex sites
-              <br />
-              ✅ Premium proxies included on free plan
             </p>
           </div>
         </div>
@@ -189,25 +182,32 @@ export default function HomePage() {
             <Building2 className="mr-2" size={20} />
             Companies to Analyze
           </h3>
+          
+          <div className="mb-4 p-3 bg-yellow-50 rounded-lg border-l-4 border-yellow-400">
+            <p className="text-sm text-yellow-800">
+              <strong>💡 Pro Tip:</strong> For accurate results, include the Facebook page URL. This helps verify we're analyzing the correct company and prevents counting ads from companies with similar names.
+            </p>
+          </div>
+
           {companies.map((company, index) => (
             <div key={index} className="mb-6 p-4 border border-gray-200 rounded-lg">
               <h4 className="font-medium text-gray-700 mb-3">Company {index + 1}</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">
-                    Company Name
+                    Company Name *
                   </label>
                   <input
                     type="text"
                     className="input-field"
-                    placeholder="Enter company name"
+                    placeholder="e.g., Infowise"
                     value={company.companyName}
                     onChange={(e) => handleCompanyChange(index, 'companyName', e.target.value)}
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">
-                    Website URL
+                    Website URL *
                   </label>
                   <input
                     type="url"
@@ -217,6 +217,29 @@ export default function HomePage() {
                     onChange={(e) => handleCompanyChange(index, 'websiteUrl', e.target.value)}
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1 flex items-center">
+                    <Facebook className="mr-1" size={14} />
+                    Facebook Page URL
+                  </label>
+                  <input
+                    type="url"
+                    className="input-field"
+                    placeholder="https://www.facebook.com/companyname"
+                    value={company.facebookUrl}
+                    onChange={(e) => handleCompanyChange(index, 'facebookUrl', e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Optional but recommended for accuracy
+                  </p>
+                </div>
+              </div>
+              
+              <div className="mt-3 p-2 bg-gray-50 rounded text-xs text-gray-600">
+                <strong>Example:</strong> 
+                <br />Company: "Infowise" 
+                <br />Website: "https://infowise.dk"
+                <br />Facebook: "https://www.facebook.com/Infowiseserviceaps"
               </div>
             </div>
           ))}
@@ -253,7 +276,7 @@ export default function HomePage() {
           </button>
           {isAnalyzing && (
             <p className="text-sm text-gray-600 mt-2">
-              Scraping Facebook Ads Library... This may take 1-2 minutes per company.
+              Scraping Facebook Ads Library with company verification... This may take 1-2 minutes per company.
             </p>
           )}
         </div>
@@ -285,7 +308,7 @@ export default function HomePage() {
               {results.companies.map((company, index) => (
                 <div key={index} className="bg-gray-50 rounded-lg p-6">
                   <div className="flex items-start justify-between mb-4">
-                    <div>
+                    <div className="flex-1">
                       <h3 className="text-lg font-semibold text-gray-900 flex items-center">
                         <Building2 className="mr-2" size={18} />
                         {company.companyName}
@@ -294,6 +317,12 @@ export default function HomePage() {
                         <Globe className="mr-1" size={14} />
                         {company.websiteUrl}
                       </p>
+                      {company.facebookUrl && (
+                        <p className="text-sm text-gray-600 flex items-center mt-1">
+                          <Facebook className="mr-1" size={14} />
+                          {company.facebookUrl}
+                        </p>
+                      )}
                     </div>
                     <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                       company.found 
@@ -324,6 +353,12 @@ export default function HomePage() {
                   ) : (
                     <div className="bg-white rounded-lg p-4 text-center text-gray-500">
                       {company.error || 'Company not found in Facebook Ads Library'}
+                    </div>
+                  )}
+                  
+                  {company.error && company.found && (
+                    <div className="mt-3 p-2 bg-yellow-50 border-l-4 border-yellow-400">
+                      <p className="text-xs text-yellow-700">{company.error}</p>
                     </div>
                   )}
                 </div>
