@@ -18,36 +18,59 @@ interface CompanyResult {
   error?: string
 }
 
-function extractFacebookHandle(facebookUrl: string): string | null {
-  if (!facebookUrl) return null
+function extractSocialHandles(facebookUrl: string): string[] {
+  if (!facebookUrl) return []
   
   try {
-    // Extract handle from various Facebook URL formats
+    // Extract main handle from Facebook URL
     const patterns = [
-      /facebook\.com\/([^\/\?#]+)/i,  // Standard format
-      /fb\.com\/([^\/\?#]+)/i,        // Short format
-      /m\.facebook\.com\/([^\/\?#]+)/i // Mobile format
+      /facebook\.com\/([^\/\?#]+)/i,
+      /fb\.com\/([^\/\?#]+)/i,
+      /m\.facebook\.com\/([^\/\?#]+)/i
     ]
     
+    let mainHandle = null
     for (const pattern of patterns) {
       const match = facebookUrl.match(pattern)
       if (match && match[1]) {
-        let handle = match[1]
-        // Remove common suffixes
-        handle = handle.replace(/\/$/, '') // trailing slash
-        handle = handle.replace(/\?.*$/, '') // query params
-        handle = handle.replace(/#.*$/, '') // fragments
-        
-        console.log(`📘 Extracted Facebook handle: "${handle}" from URL: ${facebookUrl}`)
-        return handle
+        mainHandle = match[1].replace(/\/$/, '').replace(/\?.*$/, '').replace(/#.*$/, '')
+        break
       }
     }
     
-    console.log(`⚠️  Could not extract handle from Facebook URL: ${facebookUrl}`)
-    return null
+    if (!mainHandle) {
+      console.log(`⚠️  Could not extract handle from Facebook URL: ${facebookUrl}`)
+      return []
+    }
+    
+    // Generate possible handle variations
+    const handles = [
+      mainHandle,
+      mainHandle.toLowerCase(),
+      mainHandle.replace(/[^a-zA-Z0-9]/g, ''), // Remove special characters
+      mainHandle.replace(/service|aps|as|ltd|inc|llc|corp/gi, '').trim(), // Remove common business suffixes
+    ]
+    
+    // Add Instagram variations (common patterns)
+    const instagramVariations = [
+      `${mainHandle}insta`,
+      `${mainHandle}_official`,
+      `${mainHandle}.official`,
+      `${mainHandle}_ig`,
+      mainHandle.replace(/service|aps/gi, '') // Common for Danish companies
+    ]
+    
+    handles.push(...instagramVariations)
+    
+    // Remove duplicates and empty strings
+    const uniqueHandles = [...new Set(handles)].filter(h => h && h.length > 2)
+    
+    console.log(`📘 Generated handle variations for verification:`, uniqueHandles)
+    return uniqueHandles
+    
   } catch (error) {
-    console.error('Error extracting Facebook handle:', error)
-    return null
+    console.error('Error extracting social handles:', error)
+    return []
   }
 }
 
@@ -61,19 +84,19 @@ async function scrapeFacebookAdsWithScrapingBee(
   try {
     console.log(`🐝 Scraping Facebook Ads Library for: "${companyName}"`)
     
-    // Extract Facebook handle for verification
-    const facebookHandle = facebookUrl ? extractFacebookHandle(facebookUrl) : null
-    console.log(`🎯 Facebook handle for verification: ${facebookHandle || 'Not provided'}`)
+    // Extract possible social media handles
+    const socialHandles = facebookUrl ? extractSocialHandles(facebookUrl) : []
+    console.log(`🎯 Social handles for verification: ${socialHandles.length} variations`)
     
-    // Clean the company name for better search results
+    // Clean the company name
     const cleanCompanyName = companyName.trim().replace(/[^\w\s]/g, '').trim()
     
-    // Facebook Ads Library URL - search by company name
+    // Facebook Ads Library URL
     const searchUrl = `https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=${encodeURIComponent(cleanCompanyName)}&search_type=keyword_unordered&media_type=all`
     
     console.log(`🔍 Search URL: ${searchUrl}`)
     
-    // ScrapingBee request with JavaScript rendering
+    // ScrapingBee request
     const scrapingBeeResponse = await axios.get('https://app.scrapingbee.com/api/v1/', {
       params: {
         api_key: scrapingBeeApiKey,
@@ -81,10 +104,10 @@ async function scrapeFacebookAdsWithScrapingBee(
         render_js: 'True',
         premium_proxy: 'True',
         country_code: 'US',
-        wait: 8000, // Wait longer for dropdown and content to load
+        wait: 10000, // Wait longer for content to fully load
         wait_for: '.x1i10hfl, [data-testid="serp-item"], [role="article"]'
       },
-      timeout: 150000 // 2.5 minutes timeout
+      timeout: 180000 // 3 minutes timeout
     })
 
     const htmlContent = scrapingBeeResponse.data
@@ -96,7 +119,7 @@ async function scrapeFacebookAdsWithScrapingBee(
 
     const bodyText = htmlContent.toLowerCase()
     
-    // Check for Facebook-specific "no results" indicators
+    // Check for no results
     const noResultsIndicators = [
       'no results found',
       'we couldn\'t find any results', 
@@ -123,111 +146,120 @@ async function scrapeFacebookAdsWithScrapingBee(
       }
     }
 
-    // Extract domain from website URL for verification
+    // Verification using multiple methods
     const websiteDomain = websiteUrl.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].toLowerCase()
-    console.log(`🔍 Website domain for verification: ${websiteDomain}`)
-
-    // Enhanced verification using multiple methods
     const domainAppears = bodyText.includes(websiteDomain)
     const companyNameAppears = bodyText.includes(cleanCompanyName.toLowerCase()) || bodyText.includes(companyName.toLowerCase())
     
-    // Facebook handle verification (most accurate)
-    let facebookHandleAppears = false
-    let facebookHandleVerified = false
+    // Enhanced social handle verification
+    let socialHandleVerified = false
+    let matchedHandle = null
     
-    if (facebookHandle) {
-      // Check for the Facebook handle in various formats
-      const handlePatterns = [
-        facebookHandle.toLowerCase(),
-        `@${facebookHandle.toLowerCase()}`,
-        `facebook.com/${facebookHandle.toLowerCase()}`,
-        `/${facebookHandle.toLowerCase()}`
-      ]
+    if (socialHandles.length > 0) {
+      console.log(`🔍 Searching for social handles in content...`)
       
-      for (const pattern of handlePatterns) {
-        if (bodyText.includes(pattern)) {
-          facebookHandleAppears = true
-          console.log(`✅ Facebook handle verification successful: Found "${pattern}"`)
-          break
-        }
-      }
-      
-      // Also check in the raw HTML (case-sensitive)
-      if (!facebookHandleAppears) {
-        for (const pattern of [facebookHandle, `@${facebookHandle}`, `/${facebookHandle}`]) {
-          if (htmlContent.includes(pattern)) {
-            facebookHandleAppears = true
-            console.log(`✅ Facebook handle found in HTML: "${pattern}"`)
+      for (const handle of socialHandles) {
+        const handlePatterns = [
+          `@${handle.toLowerCase()}`,
+          `@${handle}`,
+          handle.toLowerCase(),
+          `facebook.com/${handle.toLowerCase()}`,
+          `/${handle.toLowerCase()}`,
+          `"${handle.toLowerCase()}"`,
+          `"${handle}"`
+        ]
+        
+        for (const pattern of handlePatterns) {
+          if (bodyText.includes(pattern) || htmlContent.includes(pattern)) {
+            socialHandleVerified = true
+            matchedHandle = handle
+            console.log(`✅ Social handle verification successful: Found "${pattern}"`)
             break
           }
         }
+        
+        if (socialHandleVerified) break
       }
       
-      facebookHandleVerified = facebookHandleAppears
-    }
-
-    console.log(`👤 Company name "${companyName}" appears: ${companyNameAppears}`)
-    console.log(`🌐 Website domain "${websiteDomain}" appears: ${domainAppears}`)
-    console.log(`📘 Facebook handle verification: ${facebookHandleVerified}`)
-
-    // If we have a Facebook handle and it's not found, this might be wrong results
-    if (facebookHandle && !facebookHandleVerified && !domainAppears) {
-      console.log(`⚠️  Facebook handle not found - these might be ads from a different company`)
-      return {
-        found: false,
-        activeAds: null,
-        newAds: null,
-        error: `Found search results but couldn't verify they belong to the correct "${companyName}" (Facebook handle @${facebookHandle} not found)`
+      if (!socialHandleVerified) {
+        console.log(`⚠️  None of the social handles found in search results`)
+        // Don't immediately fail - continue with domain/name verification
       }
     }
 
-    // Count ads with improved filtering
+    console.log(`👤 Company name appears: ${companyNameAppears}`)
+    console.log(`🌐 Website domain appears: ${domainAppears}`)
+    console.log(`📘 Social handle verified: ${socialHandleVerified} ${matchedHandle ? `(@${matchedHandle})` : ''}`)
+
+    // Improved ad counting with better filtering
     let adCount = 0
     
-    // If we have Facebook handle verification, be more strict about counting
-    if (facebookHandleVerified) {
-      console.log(`🎯 Using strict counting with Facebook handle verification`)
+    if (socialHandleVerified && matchedHandle) {
+      console.log(`🎯 Using precise counting with verified handle: @${matchedHandle}`)
       
-      // Look for ads specifically associated with the verified handle
-      const verifiedAdPatterns = [
-        new RegExp(`${facebookHandle}[^>]*sponsored`, 'gi'),
-        new RegExp(`@${facebookHandle}[^>]*ad`, 'gi'),
-        new RegExp(`sponsored[^>]*${facebookHandle}`, 'gi')
-      ]
+      // Look for content blocks that contain both "sponsored" and the verified handle
+      const contentBlocks = htmlContent.split(/<div[^>]*data-testid="serp-item"[^>]*>/gi)
+      let verifiedAdCount = 0
       
-      for (const pattern of verifiedAdPatterns) {
-        const matches = (htmlContent.match(pattern) || []).length
-        adCount = Math.max(adCount, matches)
-        if (matches > 0) {
-          console.log(`🎯 Found ${matches} verified ads with pattern`)
+      for (const block of contentBlocks) {
+        const blockLower = block.toLowerCase()
+        const blockContainsHandle = socialHandles.some(handle => 
+          blockLower.includes(`@${handle.toLowerCase()}`) || 
+          blockLower.includes(handle.toLowerCase())
+        )
+        const blockContainsSponsored = blockLower.includes('sponsored') || blockLower.includes('ad')
+        
+        if (blockContainsHandle && blockContainsSponsored) {
+          verifiedAdCount++
         }
       }
       
-      // If verified count is low, use general counting but cap it reasonably
-      if (adCount < 5) {
-        const generalSponsoredCount = (htmlContent.match(/sponsored/gi) || []).length
-        // Cap at a reasonable number since we have verification
-        adCount = Math.min(generalSponsoredCount, 50)
-        console.log(`📊 Using general count but capped: ${adCount}`)
+      if (verifiedAdCount > 0) {
+        adCount = verifiedAdCount
+        console.log(`✅ Found ${verifiedAdCount} ads with verified handle`)
+      } else {
+        // Fallback: count ads in sections that mention the company
+        const companyMentions = htmlContent.split(new RegExp(cleanCompanyName, 'gi'))
+        const sponsoredNearCompany = companyMentions.filter(section => 
+          section.toLowerCase().includes('sponsored') || 
+          section.toLowerCase().includes('ad')
+        ).length
+        
+        adCount = Math.min(sponsoredNearCompany, 20) // Conservative cap
+        console.log(`📊 Fallback count near company mentions: ${adCount}`)
       }
       
+    } else if (domainAppears) {
+      console.log(`🌐 Using domain-based counting for ${websiteDomain}`)
+      
+      // Count sponsored content near domain mentions
+      const domainMentions = htmlContent.split(new RegExp(websiteDomain, 'gi'))
+      const sponsoredNearDomain = domainMentions.filter(section => 
+        section.toLowerCase().includes('sponsored')
+      ).length
+      
+      adCount = Math.min(sponsoredNearDomain, 30) // Cap at 30
+      console.log(`📊 Found ${adCount} ads near domain mentions`)
+      
     } else {
-      // Fallback to general counting methods
-      console.log(`📊 Using general counting methods`)
+      console.log(`📊 Using general counting (less reliable)`)
       
-      const sponsoredMatches = (htmlContent.match(/sponsored/gi) || []).length
-      const adLabelMatches = (htmlContent.match(/>\s*Ad\s*</gi) || []).length
-      const adContainerMatches = (htmlContent.match(/data-testid="serp-item"/gi) || []).length
+      // General counting but with stricter limits
+      const totalSponsored = (htmlContent.match(/sponsored/gi) || []).length
+      const totalAdLabels = (htmlContent.match(/>\s*Ad\s*</gi) || []).length
       
-      adCount = Math.max(sponsoredMatches, adLabelMatches, adContainerMatches)
-      console.log(`📊 General counting: sponsored=${sponsoredMatches}, labels=${adLabelMatches}, containers=${adContainerMatches}`)
+      // Use a fraction of total count since we can't verify the company
+      adCount = Math.min(Math.max(totalSponsored, totalAdLabels) * 0.1, 15)
+      adCount = Math.floor(adCount)
+      
+      console.log(`📊 General count (10% of ${Math.max(totalSponsored, totalAdLabels)}): ${adCount}`)
     }
 
     console.log(`📈 Final ad count: ${adCount}`)
 
-    // Results logic with better verification
+    // Results with improved verification
     if (adCount === 0) {
-      if (companyNameAppears) {
+      if (companyNameAppears || domainAppears) {
         return {
           found: false,
           activeAds: null,
@@ -244,21 +276,29 @@ async function scrapeFacebookAdsWithScrapingBee(
       }
     }
 
-    // Success case with verification status
+    // If we have very low verification but high ad count, cap it more aggressively
+    if (!socialHandleVerified && !domainAppears && adCount > 10) {
+      adCount = Math.min(adCount, 10)
+      console.log(`⚠️  Limited ad count to ${adCount} due to low verification confidence`)
+    }
+
     const newAdsRatio = dateRange <= 7 ? 0.15 : dateRange <= 30 ? 0.25 : 0.4
     const estimatedNewAds = Math.ceil(adCount * newAdsRatio)
 
+    // Verification status message
     let verificationMessage = null
-    if (facebookHandleVerified) {
-      verificationMessage = `✅ Verified with Facebook handle @${facebookHandle}`
+    if (socialHandleVerified) {
+      verificationMessage = `✅ Verified with social handle @${matchedHandle}`
     } else if (domainAppears) {
       verificationMessage = `✅ Verified with website domain ${websiteDomain}`
-    } else if (!facebookHandle) {
-      verificationMessage = `⚠️  No Facebook page provided - results may include similar company names`
+    } else if (companyNameAppears) {
+      verificationMessage = `⚠️  Verified by company name only - results may include similar companies`
+    } else {
+      verificationMessage = `⚠️  Low verification confidence - please review results carefully`
     }
 
     console.log(`✅ SUCCESS: "${companyName}" - ${adCount} active ads, ${estimatedNewAds} new ads`)
-    if (verificationMessage) console.log(verificationMessage)
+    console.log(verificationMessage)
 
     return {
       found: true,
@@ -309,7 +349,7 @@ async function scrapeFacebookAdsWithScrapingBee(
 export async function POST(request: NextRequest) {
   try {
     const { openaiApiKey, scrapingBeeApiKey, companies, dateRange } = await request.json()
-    console.log('🚀 Starting ScrapingBee analysis with Facebook verification for', companies.length, 'companies')
+    console.log('🚀 Starting enhanced Facebook verification analysis for', companies.length, 'companies')
 
     if (!openaiApiKey) {
       return NextResponse.json({ error: 'OpenAI API key is required' }, { status: 400 })
@@ -349,10 +389,10 @@ export async function POST(request: NextRequest) {
           error: scrapingResult.error || undefined
         })
 
-        // Longer delay to be respectful and avoid rate limits
+        // Wait between requests
         if (i < companies.length - 1) {
-          console.log('⏱️  Waiting 10 seconds before next request...')
-          await new Promise(resolve => setTimeout(resolve, 10000))
+          console.log('⏱️  Waiting 12 seconds before next request...')
+          await new Promise(resolve => setTimeout(resolve, 12000))
         }
 
       } catch (error) {
@@ -375,7 +415,7 @@ export async function POST(request: NextRequest) {
       companies: results,
       dateRange,
       analysisDate: new Date().toISOString().split('T')[0],
-      dataSource: 'Facebook Ads Library with Handle Verification (via ScrapingBee)'
+      dataSource: 'Facebook Ads Library with Multi-Handle Verification (via ScrapingBee)'
     })
 
   } catch (error) {
