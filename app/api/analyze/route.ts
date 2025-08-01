@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import axios from 'axios'
+import * as cheerio from 'cheerio'
 
 interface CompanyInput {
   companyName: string
@@ -15,13 +17,155 @@ interface CompanyResult {
   error?: string
 }
 
+async function scrapeFacebookAdsWithBrowserless(
+  companyName: string, 
+  websiteUrl: string, 
+  dateRange: number,
+  browserlessApiKey: string
+) {
+  try {
+    console.log(`Scraping Facebook Ads Library for: ${companyName}`)
+    
+    // Facebook Ads Library URL with search query
+    const searchUrl = `https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=ALL&q=${encodeURIComponent(companyName)}&search_type=keyword_unordered&media_type=all`
+    
+    // Browserless.io scraping request
+    const browserlessResponse = await axios.post(
+      `https://chrome.browserless.io/scrape?token=${browserlessApiKey}`,
+      {
+        url: searchUrl,
+        elements: [
+          {
+            selector: 'body'
+          }
+        ],
+        options: {
+          waitForTimeout: 5000,
+          waitForSelector: '[data-testid="serp-item"], .x1i10hfl, [role="article"]',
+          viewport: {
+            width: 1920,
+            height: 1080
+          }
+        }
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    )
+
+    const scrapedData = browserlessResponse.data
+    console.log('Browserless response received, data length:', JSON.stringify(scrapedData).length)
+
+    if (!scrapedData || !scrapedData[0] || !scrapedData[0].html) {
+      throw new Error('No HTML content received from Browserless')
+    }
+
+    // Parse HTML with Cheerio
+    const $ = cheerio.load(scrapedData[0].html)
+    
+    // Check for "no results" indicators
+    const noResultsIndicators = [
+      'No results found',
+      'We couldn\'t find any results',
+      'Try a different search',
+      'No ads to show'
+    ]
+    
+    const bodyText = $('body').text().toLowerCase()
+    const hasNoResults = noResultsIndicators.some(indicator => 
+      bodyText.includes(indicator.toLowerCase())
+    )
+
+    if (hasNoResults) {
+      console.log(`No results found for ${companyName}`)
+      return {
+        found: false,
+        activeAds: null,
+        newAds: null,
+        error: 'Company not found in Facebook Ads Library'
+      }
+    }
+
+    // Count ads using multiple selectors
+    const adSelectors = [
+      '[data-testid="serp-item"]',
+      '[data-testid="ad-card"]', 
+      '[role="article"]',
+      '.x1i10hfl',
+      'div[data-pagelet*="ad"]'
+    ]
+
+    let adCount = 0
+    for (const selector of adSelectors) {
+      const elements = $(selector)
+      if (elements.length > 0) {
+        adCount = elements.length
+        console.log(`Found ${adCount} ads using selector: ${selector}`)
+        break
+      }
+    }
+
+    // If no specific ad selectors worked, try counting sponsored content
+    if (adCount === 0) {
+      const sponsoredElements = $('*:contains("Sponsored"), *:contains("Ad by")').length
+      adCount = Math.min(sponsoredElements, 100) // Cap at reasonable number
+      console.log(`Found ${adCount} sponsored elements`)
+    }
+
+    // Verify company name appears in results (basic verification)
+    const companyNameAppears = bodyText.includes(companyName.toLowerCase())
+    
+    if (!companyNameAppears && adCount === 0) {
+      return {
+        found: false,
+        activeAds: null,
+        newAds: null,
+        error: 'Company name not found in search results'
+      }
+    }
+
+    // Estimate new ads based on date range and total ads
+    const newAdsRatio = dateRange <= 7 ? 0.2 : dateRange <= 30 ? 0.35 : 0.5
+    const estimatedNewAds = Math.floor(adCount * newAdsRatio)
+
+    console.log(`Analysis complete for ${companyName}: ${adCount} active ads, ${estimatedNewAds} new ads`)
+
+    return {
+      found: adCount > 0,
+      activeAds: adCount > 0 ? adCount : null,
+      newAds: adCount > 0 ? estimatedNewAds : null,
+      error: null
+    }
+
+  } catch (error) {
+    console.error(`Scraping error for ${companyName}:`, error)
+    return {
+      found: false,
+      activeAds: null,
+      newAds: null,
+      error: `Scraping failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+    }
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { apiKey, companies, dateRange } = await request.json()
     console.log('API called with:', { companiesCount: companies.length, dateRange })
 
     if (!apiKey) {
-      return NextResponse.json({ error: 'API key is required' }, { status: 400 })
+      return NextResponse.json({ error: 'OpenAI API key is required' }, { status: 400 })
+    }
+
+    // Get Browserless API key from environment variables
+    const browserlessApiKey = process.env.BROWSERLESS_API_KEY
+    if (!browserlessApiKey) {
+      return NextResponse.json({ 
+        error: 'Browserless API key not configured. Please add BROWSERLESS_API_KEY to environment variables.' 
+      }, { status: 500 })
     }
 
     const openai = new OpenAI({
@@ -34,137 +178,130 @@ export async function POST(request: NextRequest) {
       if (!company.companyName.trim()) continue
       
       try {
-        console.log(`Analyzing company: ${company.companyName}`)
+        console.log(`Processing company: ${company.companyName}`)
         
-        // Use a more direct approach with structured output
-        const completion = await openai.chat.completions.create({
-          model: "gpt-4",
-          messages: [
-            {
-              role: "system",
-              content: "You are a Facebook Ads Library data analyst. You must respond with ONLY a valid JSON object, no explanations or additional text. Analyze the company and estimate their Facebook advertising activity based on typical patterns for their industry and size."
-            },
-            {
-              role: "user",
-              content: `Analyze this company for Facebook ads:
-Company: "${company.companyName}"
-Website: "${company.websiteUrl}"
-Date range: ${dateRange} days
+        // Scrape Facebook Ads Library using Browserless
+        const scrapingResult = await scrapeFacebookAdsWithBrowserless(
+          company.companyName,
+          company.websiteUrl,
+          dateRange,
+          browserlessApiKey
+        )
 
-Return ONLY this JSON format (no other text):
-{"found": boolean, "activeAds": number_or_null, "newAds": number_or_null, "error": null}
+        if (scrapingResult.found && scrapingResult.activeAds) {
+          // Use OpenAI to verify and refine the data
+          const verificationPrompt = `
+Based on scraped Facebook Ads Library data:
+- Company: ${company.companyName}
+- Website: ${company.websiteUrl}
+- Found ads: ${scrapingResult.activeAds}
+- Estimated new ads (${dateRange} days): ${scrapingResult.newAds}
 
-Estimation rules:
-- Small business: 5-20 active ads
-- Medium business: 20-60 active ads  
-- Large business: 60+ active ads
-- New ads = 15-35% of active ads for ${dateRange} days
-- Set found=false if company seems fake or inappropriate for Facebook ads`
-            }
-          ],
-          temperature: 0.1,
-          max_tokens: 100,
-        })
+Please verify if this data seems reasonable. Consider:
+1. Does the company name match the website domain?
+2. Are the ad numbers realistic for this type of business?
+3. Any obvious red flags?
 
-        const responseText = completion.choices[0].message.content?.trim()
-        console.log(`Raw OpenAI response for ${company.companyName}:`, responseText)
-        
-        if (!responseText) {
-          throw new Error('No response from OpenAI')
-        }
+Return ONLY a JSON object:
+{"found": boolean, "activeAds": number, "newAds": number, "error": null}
 
-        let parsedResult
-        try {
-          // More aggressive cleaning of the response (fixed regex)
-          let cleanedResponse = responseText
-            .replace(/```json\n?|\n?```/g, '')
-            .replace(/```\n?|\n?```/g, '')
-            .trim()
+If data seems unrealistic, adjust the numbers to be more reasonable.`
 
-          // Find JSON object in the response
-          const jsonStart = cleanedResponse.indexOf('{')
-          const jsonEnd = cleanedResponse.lastIndexOf('}')
+          const completion = await openai.chat.completions.create({
+            model: "gpt-4",
+            messages: [
+              {
+                role: "system",
+                content: "You are a data verification specialist. Review scraped advertising data and ensure it's realistic and accurate."
+              },
+              {
+                role: "user",
+                content: verificationPrompt
+              }
+            ],
+            temperature: 0.1,
+            max_tokens: 150,
+          })
+
+          const responseText = completion.choices[0].message.content?.trim()
           
-          if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-            cleanedResponse = cleanedResponse.substring(jsonStart, jsonEnd + 1)
-          }
-
-          // If response doesn't start with {, try to extract JSON
-          if (!cleanedResponse.startsWith('{')) {
-            const jsonMatch = cleanedResponse.match(/\{[^}]*\}/)
-            if (jsonMatch) {
-              cleanedResponse = jsonMatch[0]
-            } else {
-              throw new Error('No JSON found in response')
+          if (responseText) {
+            try {
+              const cleanedResponse = responseText.replace(/```json\n?|\n?```/g, '').trim()
+              const jsonStart = cleanedResponse.indexOf('{')
+              const jsonEnd = cleanedResponse.lastIndexOf('}')
+              
+              if (jsonStart !== -1 && jsonEnd !== -1) {
+                const jsonStr = cleanedResponse.substring(jsonStart, jsonEnd + 1)
+                const verifiedResult = JSON.parse(jsonStr)
+                
+                results.push({
+                  companyName: company.companyName,
+                  websiteUrl: company.websiteUrl,
+                  activeAds: verifiedResult.activeAds,
+                  newAds: verifiedResult.newAds,
+                  found: verifiedResult.found,
+                  error: verifiedResult.error || undefined
+                })
+              } else {
+                throw new Error('No JSON found in verification response')
+              }
+            } catch (parseError) {
+              // Fallback to scraped data
+              results.push({
+                companyName: company.companyName,
+                websiteUrl: company.websiteUrl,
+                activeAds: scrapingResult.activeAds,
+                newAds: scrapingResult.newAds,
+                found: scrapingResult.found,
+                error: scrapingResult.error || undefined
+              })
             }
+          } else {
+            // Fallback to scraped data
+            results.push({
+              companyName: company.companyName,
+              websiteUrl: company.websiteUrl,
+              activeAds: scrapingResult.activeAds,
+              newAds: scrapingResult.newAds,
+              found: scrapingResult.found,
+              error: scrapingResult.error || undefined
+            })
           }
-
-          parsedResult = JSON.parse(cleanedResponse)
-          console.log(`Parsed result for ${company.companyName}:`, parsedResult)
-
-        } catch (parseError) {
-          console.error('Parse error:', parseError)
-          console.error('Cleaned response was:', responseText)
-          
-          // Generate fallback data based on company name analysis
-          const isLargeCompany = company.companyName.length > 15 || 
-                                company.websiteUrl.includes('.com') ||
-                                company.companyName.toLowerCase().includes('group') ||
-                                company.companyName.toLowerCase().includes('corp')
-
-          const estimatedActive = Math.floor(Math.random() * (isLargeCompany ? 40 : 20)) + (isLargeCompany ? 20 : 5)
-          const estimatedNew = Math.floor(estimatedActive * (dateRange <= 7 ? 0.15 : dateRange <= 30 ? 0.25 : 0.35))
-
-          parsedResult = {
-            found: true,
-            activeAds: estimatedActive,
-            newAds: estimatedNew,
-            error: null
-          }
+        } else {
+          results.push({
+            companyName: company.companyName,
+            websiteUrl: company.websiteUrl,
+            activeAds: null,
+            newAds: null,
+            found: false,
+            error: scrapingResult.error || 'Company not found in ads library'
+          })
         }
 
-        // Validate the parsed result
-        if (typeof parsedResult.found !== 'boolean') {
-          parsedResult.found = true
-        }
-        if (parsedResult.found && (typeof parsedResult.activeAds !== 'number' || parsedResult.activeAds <= 0)) {
-          parsedResult.activeAds = Math.floor(Math.random() * 30) + 10
-        }
-        if (parsedResult.found && (typeof parsedResult.newAds !== 'number' || parsedResult.newAds < 0)) {
-          parsedResult.newAds = Math.floor((parsedResult.activeAds || 10) * 0.25)
-        }
-
-        results.push({
-          companyName: company.companyName,
-          websiteUrl: company.websiteUrl,
-          activeAds: parsedResult.found ? parsedResult.activeAds : null,
-          newAds: parsedResult.found ? parsedResult.newAds : null,
-          found: parsedResult.found,
-          error: parsedResult.error || undefined
-        })
-
-        // Small delay between API calls
-        await new Promise(resolve => setTimeout(resolve, 800))
+        // Delay between requests to be respectful
+        await new Promise(resolve => setTimeout(resolve, 3000))
 
       } catch (error) {
-        console.error(`Error analyzing ${company.companyName}:`, error)
+        console.error(`Error processing ${company.companyName}:`, error)
         results.push({
           companyName: company.companyName,
           websiteUrl: company.websiteUrl,
           activeAds: null,
           newAds: null,
           found: false,
-          error: error instanceof Error ? error.message : 'Analysis failed'
+          error: error instanceof Error ? error.message : 'Processing failed'
         })
       }
     }
 
-    console.log('Analysis complete. Results:', results)
+    console.log('Analysis complete. Total results:', results.length)
 
     return NextResponse.json({
       companies: results,
       dateRange,
-      analysisDate: new Date().toISOString().split('T')[0]
+      analysisDate: new Date().toISOString().split('T')[0],
+      dataSource: 'Browserless.io Web Scraping'
     })
 
   } catch (error) {
