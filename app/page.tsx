@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Download, Calendar, Globe, Building2 } from 'lucide-react'
+import { Search, Download, Calendar, Globe, Building2, Key } from 'lucide-react'
 import * as XLSX from 'xlsx'
 
 interface CompanyData {
@@ -17,10 +17,12 @@ interface AnalysisResults {
   companies: CompanyData[]
   dateRange: number
   analysisDate: string
+  dataSource?: string
 }
 
 export default function HomePage() {
-  const [apiKey, setApiKey] = useState('')
+  const [openaiApiKey, setOpenaiApiKey] = useState('')
+  const [browserlessApiKey, setBrowserlessApiKey] = useState('')
   const [companies, setCompanies] = useState([
     { companyName: '', websiteUrl: '' },
     { companyName: '', websiteUrl: '' },
@@ -37,8 +39,13 @@ export default function HomePage() {
   }
 
   const handleAnalyze = async () => {
-    if (!apiKey.trim()) {
+    if (!openaiApiKey.trim()) {
       alert('Please enter your OpenAI API key')
+      return
+    }
+
+    if (!browserlessApiKey.trim()) {
+      alert('Please enter your Browserless.io API key')
       return
     }
 
@@ -57,49 +64,51 @@ export default function HomePage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          apiKey,
+          openaiApiKey,
+          browserlessApiKey,
           companies: filledCompanies,
           dateRange
         })
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        const errorData = await response.json()
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
       }
 
       const data = await response.json()
       setResults(data)
     } catch (error) {
       console.error('Analysis failed:', error)
-      alert('Analysis failed. Please check your API key and try again.')
+      alert(`Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     } finally {
       setIsAnalyzing(false)
     }
   }
 
-const exportToSpreadsheet = () => {
-  if (!results) return
+  const exportToSpreadsheet = () => {
+    if (!results) return
 
-  const exportData = results.companies.map(company => {
     const newAdsColumnName = `New Ads (Last ${results.dateRange} Days)`
     
-    return {
-      'Company Name': company.companyName,
-      'Website URL': company.websiteUrl,
-      'Found in Ads Library': company.found ? 'Yes' : 'No',
-      'Active Ads': company.found ? company.activeAds : 'N/A',
-      [newAdsColumnName]: company.found ? company.newAds : 'N/A',
-      'Error': company.error || ''
-    }
-  })
+    const exportData = results.companies.map(company => {
+      return {
+        'Company Name': company.companyName,
+        'Website URL': company.websiteUrl,
+        'Found in Ads Library': company.found ? 'Yes' : 'No',
+        'Active Ads': company.found ? company.activeAds : 'N/A',
+        [newAdsColumnName]: company.found ? company.newAds : 'N/A',
+        'Error': company.error || ''
+      }
+    })
 
-  const worksheet = XLSX.utils.json_to_sheet(exportData)
-  const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Facebook Ads Analysis')
-  
-  const fileName = `facebook-ads-analysis-${new Date().toISOString().split('T')[0]}.xlsx`
-  XLSX.writeFile(workbook, fileName)
-}
+    const worksheet = XLSX.utils.json_to_sheet(exportData)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Facebook Ads Analysis')
+    
+    const fileName = `facebook-ads-analysis-${new Date().toISOString().split('T')[0]}.xlsx`
+    XLSX.writeFile(workbook, fileName)
+  }
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -109,22 +118,60 @@ const exportToSpreadsheet = () => {
             Facebook Ads Library Analyzer
           </h1>
           <p className="text-gray-600">
-            Analyze active and new ads for multiple companies using AI
+            Real-time Facebook Ads analysis using web scraping technology
           </p>
         </div>
 
-        {/* API Key Input */}
-        <div className="mb-8">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            OpenAI API Key
-          </label>
-          <input
-            type="password"
-            className="input-field"
-            placeholder="Enter your OpenAI API key"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
+        {/* API Keys Section */}
+        <div className="mb-8 p-6 bg-gray-50 rounded-lg">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+            <Key className="mr-2" size={20} />
+            API Configuration
+          </h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                OpenAI API Key
+              </label>
+              <input
+                type="password"
+                className="input-field"
+                placeholder="sk-..."
+                value={openaiApiKey}
+                onChange={(e) => setOpenaiApiKey(e.target.value)}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Used for data verification and analysis
+              </p>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Browserless.io API Key
+              </label>
+              <input
+                type="password"
+                className="input-field"
+                placeholder="Enter your Browserless API key"
+                value={browserlessApiKey}
+                onChange={(e) => setBrowserlessApiKey(e.target.value)}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Used for web scraping Facebook Ads Library
+              </p>
+            </div>
+          </div>
+          
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-700">
+              <strong>Need API keys?</strong>
+              <br />
+              • OpenAI: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline">platform.openai.com/api-keys</a>
+              <br />
+              • Browserless.io: <a href="https://www.browserless.io" target="_blank" rel="noopener noreferrer" className="underline">browserless.io</a> (free tier available)
+            </p>
+          </div>
         </div>
 
         {/* Company Inputs */}
@@ -195,13 +242,23 @@ const exportToSpreadsheet = () => {
             <Search className="mr-2" size={20} />
             {isAnalyzing ? 'Analyzing...' : 'Start Analysis'}
           </button>
+          {isAnalyzing && (
+            <p className="text-sm text-gray-600 mt-2">
+              This may take 30-60 seconds per company...
+            </p>
+          )}
         </div>
 
         {/* Results */}
         {results && (
           <div className="border-t pt-8">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-gray-900">Analysis Results</h2>
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900">Analysis Results</h2>
+                {results.dataSource && (
+                  <p className="text-sm text-gray-600">Data Source: {results.dataSource}</p>
+                )}
+              </div>
               <button
                 onClick={exportToSpreadsheet}
                 className="btn-secondary flex items-center"
