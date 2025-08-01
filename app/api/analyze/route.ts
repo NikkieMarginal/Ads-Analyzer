@@ -33,43 +33,36 @@ async function scrapeFacebookAdsWithBrowserless(
     
     console.log(`Search URL: ${searchUrl}`)
     
-    // Browserless.io request using the correct endpoint
+    // Try the basic /scrape endpoint which should work on free plans
     const browserlessResponse = await axios.post(
-      `https://chrome.browserless.io/content?token=${browserlessApiKey}`,
+      `https://chrome.browserless.io/scrape?token=${browserlessApiKey}`,
       {
         url: searchUrl,
-        waitForTimeout: 10000,
-        viewport: {
-          width: 1920,
-          height: 1080
-        },
-        setJavaScriptEnabled: true,
-        addScriptTag: [{
-          content: `
-            // Wait for page to load and scroll to load more ads
-            setTimeout(() => {
-              window.scrollTo(0, document.body.scrollHeight);
-              setTimeout(() => {
-                window.scrollTo(0, document.body.scrollHeight);
-              }, 2000);
-            }, 3000);
-          `
-        }]
+        elements: [
+          {
+            selector: "body"
+          }
+        ]
       },
       {
         headers: {
           'Content-Type': 'application/json'
         },
-        timeout: 90000 // 90 seconds timeout
+        timeout: 60000
       }
     )
 
-    const htmlContent = browserlessResponse.data
-    console.log('✅ Browserless response received, HTML length:', htmlContent.length)
-
-    if (!htmlContent || typeof htmlContent !== 'string') {
+    console.log('✅ Browserless response received')
+    
+    const scrapedData = browserlessResponse.data
+    
+    if (!scrapedData || !Array.isArray(scrapedData) || !scrapedData[0] || !scrapedData[0].html) {
+      console.error('Invalid response format:', scrapedData)
       throw new Error('No HTML content received from Browserless')
     }
+
+    const htmlContent = scrapedData[0].html
+    console.log('📄 HTML content length:', htmlContent.length)
 
     const bodyText = htmlContent.toLowerCase()
     
@@ -81,7 +74,8 @@ async function scrapeFacebookAdsWithBrowserless(
       'no ads to show',
       'no results',
       'nothing to show here',
-      'no active ads'
+      'no active ads',
+      'try different keywords'
     ]
     
     const hasNoResults = noResultsIndicators.some(indicator => 
@@ -109,101 +103,90 @@ async function scrapeFacebookAdsWithBrowserless(
     const companyNameAppears = bodyText.includes(cleanCompanyName.toLowerCase()) ||
                               bodyText.includes(companyName.toLowerCase())
 
-    console.log(`👤 Company name "${companyName}" appears in results: ${companyNameAppears}`)
-    console.log(`🌐 Website domain "${websiteDomain}" appears in results: ${domainAppears}`)
+    console.log(`👤 Company name "${companyName}" appears: ${companyNameAppears}`)
+    console.log(`🌐 Website domain "${websiteDomain}" appears: ${domainAppears}`)
 
-    // Count ads using multiple approaches
+    // Count ads using simple but effective methods
     let adCount = 0
     
-    // Method 1: Look for "Sponsored" or "Ad" text
-    const sponsoredMatches = htmlContent.match(/sponsored/gi) || []
-    const adMatches = htmlContent.match(/>\s*ad\s*</gi) || []
-    console.log(`📊 Found ${sponsoredMatches.length} "sponsored" mentions, ${adMatches.length} "ad" labels`)
+    // Method 1: Count "Sponsored" text (most reliable)
+    const sponsoredMatches = (htmlContent.match(/sponsored/gi) || []).length
+    console.log(`📊 Found ${sponsoredMatches} "sponsored" mentions`)
     
-    adCount = Math.max(sponsoredMatches.length, adMatches.length)
-
-    // Method 2: Look for Facebook ad containers
-    const containerPatterns = [
-      /data-testid="serp-item"/gi,
-      /role="article"/gi,
-      /data-testid="ad-"/gi
-    ]
-
-    for (const pattern of containerPatterns) {
-      const matches = htmlContent.match(pattern) || []
-      if (matches.length > 0) {
-        console.log(`📦 Found ${matches.length} containers with pattern: ${pattern.source}`)
-        adCount = Math.max(adCount, matches.length)
-      }
+    // Method 2: Count "Ad" labels in typical Facebook format
+    const adLabelMatches = (htmlContent.match(/>\s*Ad\s*</gi) || []).length
+    console.log(`📊 Found ${adLabelMatches} "Ad" labels`)
+    
+    // Method 3: Look for data attributes commonly used in Facebook ads
+    const dataTestMatches = (htmlContent.match(/data-testid="[^"]*ad[^"]*"/gi) || []).length
+    console.log(`📊 Found ${dataTestMatches} ad data attributes`)
+    
+    // Use the highest count from our methods
+    adCount = Math.max(sponsoredMatches, adLabelMatches, dataTestMatches)
+    
+    // If we have very few results, try alternative counting
+    if (adCount < 3) {
+      // Look for article elements (Facebook often uses these for ads)
+      const articleMatches = (htmlContent.match(/<article[^>]*>/gi) || []).length
+      console.log(`📊 Found ${articleMatches} article elements`)
+      adCount = Math.max(adCount, Math.min(articleMatches, 20)) // Cap at 20
     }
 
-    // Method 3: Look for ad-related divs and elements
-    const adElementPatterns = [
-      /<div[^>]*data-[^>]*ad[^>]*>/gi,
-      /<div[^>]*aria-label="[^"]*ad[^"]*"[^>]*>/gi
-    ]
+    console.log(`📈 Final ad count: ${adCount}`)
 
-    for (const pattern of adElementPatterns) {
-      const matches = htmlContent.match(pattern) || []
-      if (matches.length > 0) {
-        console.log(`🎯 Found ${matches.length} ad elements`)
-        adCount = Math.max(adCount, matches.length)
-      }
-    }
-
-    console.log(`📈 Total ad count detected: ${adCount}`)
-
-    // Verification logic
+    // Verification and results
     if (adCount === 0) {
-      if (!companyNameAppears) {
+      if (companyNameAppears) {
         return {
           found: false,
           activeAds: null,
           newAds: null,
-          error: `Company "${companyName}" not found in Facebook Ads Library`
+          error: `Found "${companyName}" but no active ads detected`
         }
       } else {
         return {
           found: false,
           activeAds: null,
           newAds: null,
-          error: `Company found but no active ads detected`
+          error: `Company "${companyName}" not found in Facebook Ads Library`
         }
       }
     }
 
-    // If we found ads but can't verify the company, still return the data but with warning
-    let verificationWarning = null
-    if (adCount > 0 && !domainAppears && !companyNameAppears) {
-      verificationWarning = `Found ${adCount} ads but couldn't fully verify they belong to "${companyName}". Please review results.`
-      console.log(`⚠️  ${verificationWarning}`)
-    }
-
-    // Estimate new ads based on date range
+    // We found ads! Estimate new ads based on date range
     const newAdsRatio = dateRange <= 7 ? 0.15 : dateRange <= 30 ? 0.25 : 0.4
     const estimatedNewAds = Math.ceil(adCount * newAdsRatio)
 
-    console.log(`✅ Success for "${companyName}": ${adCount} active ads, ${estimatedNewAds} estimated new ads`)
+    // Add verification warning if needed
+    let resultError = null
+    if (!domainAppears && !companyNameAppears) {
+      resultError = `Found ${adCount} ads but verification uncertain - please review results`
+    }
+
+    console.log(`✅ SUCCESS: "${companyName}" - ${adCount} active ads, ${estimatedNewAds} new ads`)
 
     return {
       found: true,
       activeAds: adCount,
       newAds: estimatedNewAds,
-      error: verificationWarning || null
+      error: resultError
     }
 
   } catch (error) {
-    console.error(`💥 Scraping error for "${companyName}":`, error)
+    console.error(`💥 Error scraping "${companyName}":`, error)
     
-    // More detailed error information
     if (axios.isAxiosError(error)) {
       const status = error.response?.status
       const statusText = error.response?.statusText
-      return {
-        found: false,
-        activeAds: null,
-        newAds: null,
-        error: `HTTP ${status}: ${statusText || 'Request failed'}`
+      console.error(`HTTP Error: ${status} ${statusText}`)
+      
+      if (status === 429) {
+        return {
+          found: false,
+          activeAds: null,
+          newAds: null,
+          error: 'Rate limit exceeded - please wait and try again'
+        }
       }
     }
     
@@ -229,25 +212,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Browserless API key is required' }, { status: 400 })
     }
 
-    // Test Browserless connection with your actual API key format
+    // Test connection with the simplest possible request
     try {
-      console.log('🧪 Testing Browserless connection with key:', browserlessApiKey.substring(0, 8) + '...')
+      console.log('🧪 Testing Browserless with simple request...')
       
       const testResponse = await axios.post(
-        `https://chrome.browserless.io/content?token=${browserlessApiKey}`,
+        `https://chrome.browserless.io/scrape?token=${browserlessApiKey}`,
         {
-          url: 'https://httpbin.org/json',
-          waitForTimeout: 3000
+          url: 'https://example.com',
+          elements: [
+            {
+              selector: "title"
+            }
+          ]
         },
         { 
-          timeout: 20000,
+          timeout: 30000,
           headers: {
             'Content-Type': 'application/json'
           }
         }
       )
       
-      console.log('✅ Browserless connection successful! Response length:', testResponse.data.length)
+      console.log('✅ Browserless test successful!')
+      console.log('Test response:', testResponse.data?.[0]?.text || 'No text found')
       
     } catch (testError) {
       console.error('❌ Browserless test failed:', testError)
@@ -256,21 +244,21 @@ export async function POST(request: NextRequest) {
       
       if (axios.isAxiosError(testError)) {
         const status = testError.response?.status
-        const statusText = testError.response?.statusText
+        const data = testError.response?.data
+        
+        console.error('Error response:', { status, data })
         
         if (status === 401) {
-          errorMessage += 'Invalid API key. Please check your Browserless.io API key.'
+          errorMessage += 'Invalid API key. Please verify your Browserless.io API key.'
         } else if (status === 403) {
-          errorMessage += 'API key valid but access denied. Check your plan limits.'
+          errorMessage += 'Access denied. Your free plan might not support this endpoint. Try upgrading or contact Browserless support.'
         } else if (status === 429) {
-          errorMessage += 'Rate limit exceeded. Please try again later.'
-        } else if (status) {
-          errorMessage += `HTTP ${status}: ${statusText}`
+          errorMessage += 'Rate limit exceeded. Please wait and try again.'
         } else {
-          errorMessage += 'Network timeout or connection error.'
+          errorMessage += `HTTP ${status}: ${testError.response?.statusText || 'Unknown error'}`
         }
       } else {
-        errorMessage += testError instanceof Error ? testError.message : 'Unknown error'
+        errorMessage += testError instanceof Error ? testError.message : 'Network error'
       }
       
       return NextResponse.json({ 
@@ -303,10 +291,10 @@ export async function POST(request: NextRequest) {
           error: scrapingResult.error || undefined
         })
 
-        // Delay between requests
+        // Longer delay to stay within rate limits
         if (i < companies.length - 1) {
-          console.log('⏱️  Waiting 5 seconds before next request...')
-          await new Promise(resolve => setTimeout(resolve, 5000))
+          console.log('⏱️  Waiting 6 seconds before next request...')
+          await new Promise(resolve => setTimeout(resolve, 6000))
         }
 
       } catch (error) {
@@ -323,7 +311,6 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('\n🎉 Analysis complete!')
-    console.log('Results:', results.map(r => `${r.companyName}: ${r.found ? `${r.activeAds} ads` : 'not found'}`))
 
     return NextResponse.json({
       companies: results,
