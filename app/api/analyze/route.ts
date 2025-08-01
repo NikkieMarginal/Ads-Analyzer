@@ -191,71 +191,124 @@ async function scrapeFacebookAdsWithScrapingBee(
     console.log(`🌐 Website domain appears: ${domainAppears}`)
     console.log(`📘 Social handle verified: ${socialHandleVerified} ${matchedHandle ? `(@${matchedHandle})` : ''}`)
 
-    // Improved ad counting with better filtering
+  // Balanced ad counting - multiple methods with verification
     let adCount = 0
+    let verificationLevel = 'none'
     
     if (socialHandleVerified && matchedHandle) {
-      console.log(`🎯 Using precise counting with verified handle: @${matchedHandle}`)
+      console.log(`🎯 Using verified handle counting for: @${matchedHandle}`)
+      verificationLevel = 'handle'
       
-      // Look for content blocks that contain both "sponsored" and the verified handle
-      const contentBlocks = htmlContent.split(/<div[^>]*data-testid="serp-item"[^>]*>/gi)
-      let verifiedAdCount = 0
+      // Method 1: Count sponsored content with looser proximity to handle
+      const handleVariations = socialHandles.map(h => h.toLowerCase())
+      let handleBasedCount = 0
       
-      for (const block of contentBlocks) {
-        const blockLower = block.toLowerCase()
-        const blockContainsHandle = socialHandles.some(handle => 
-          blockLower.includes(`@${handle.toLowerCase()}`) || 
-          blockLower.includes(handle.toLowerCase())
+      // Split content into larger sections for better context
+      const contentSections = htmlContent.split(/(?=<div[^>]*data-testid)|(?=<article)|(?=<div[^>]*role="article")/gi)
+      
+      for (const section of contentSections) {
+        const sectionLower = section.toLowerCase()
+        const hasHandle = handleVariations.some(handle => 
+          sectionLower.includes(`@${handle}`) || 
+          sectionLower.includes(`/${handle}`) ||
+          sectionLower.includes(`"${handle}"`) ||
+          sectionLower.includes(handle)
         )
-        const blockContainsSponsored = blockLower.includes('sponsored') || blockLower.includes('ad')
+        const hasAdIndicator = sectionLower.includes('sponsored') || 
+                              sectionLower.includes('>ad<') ||
+                              sectionLower.includes('advertisement')
         
-        if (blockContainsHandle && blockContainsSponsored) {
-          verifiedAdCount++
+        if (hasHandle && hasAdIndicator) {
+          handleBasedCount++
         }
       }
       
-      if (verifiedAdCount > 0) {
-        adCount = verifiedAdCount
-        console.log(`✅ Found ${verifiedAdCount} ads with verified handle`)
+      console.log(`📊 Handle-based section count: ${handleBasedCount}`)
+      
+      // Method 2: Count direct "sponsored" mentions (with reasonable cap for verified companies)
+      const sponsoredCount = (htmlContent.match(/sponsored/gi) || []).length
+      const cappedSponsoredCount = Math.min(sponsoredCount, 50) // Cap at 50 for verified companies
+      
+      console.log(`📊 Total sponsored mentions: ${sponsoredCount}, capped: ${cappedSponsoredCount}`)
+      
+      // Method 3: Count ad container elements
+      const containerCount = (htmlContent.match(/data-testid="serp-item"/gi) || []).length
+      console.log(`📊 Ad container count: ${containerCount}`)
+      
+      // Use the method that gives a reasonable middle ground
+      if (handleBasedCount > 0) {
+        adCount = handleBasedCount
+        console.log(`✅ Using handle-based count: ${adCount}`)
+      } else if (containerCount > 0 && containerCount <= 100) {
+        adCount = containerCount
+        console.log(`✅ Using container count: ${adCount}`)
       } else {
-        // Fallback: count ads in sections that mention the company
-        const companyMentions = htmlContent.split(new RegExp(cleanCompanyName, 'gi'))
-        const sponsoredNearCompany = companyMentions.filter(section => 
-          section.toLowerCase().includes('sponsored') || 
-          section.toLowerCase().includes('ad')
-        ).length
-        
-        adCount = Math.min(sponsoredNearCompany, 20) // Conservative cap
-        console.log(`📊 Fallback count near company mentions: ${adCount}`)
+        // Use a percentage of sponsored count for verified companies
+        adCount = Math.floor(cappedSponsoredCount * 0.7) // 70% of sponsored mentions
+        console.log(`✅ Using 70% of sponsored count: ${adCount}`)
       }
       
     } else if (domainAppears) {
       console.log(`🌐 Using domain-based counting for ${websiteDomain}`)
+      verificationLevel = 'domain'
       
-      // Count sponsored content near domain mentions
-      const domainMentions = htmlContent.split(new RegExp(websiteDomain, 'gi'))
-      const sponsoredNearDomain = domainMentions.filter(section => 
-        section.toLowerCase().includes('sponsored')
-      ).length
+      // More generous counting for domain-verified companies
+      const sponsoredCount = (htmlContent.match(/sponsored/gi) || []).length
+      const containerCount = (htmlContent.match(/data-testid="serp-item"/gi) || []).length
+      const adLabelCount = (htmlContent.match(/>\s*Ad\s*</gi) || []).length
       
-      adCount = Math.min(sponsoredNearDomain, 30) // Cap at 30
-      console.log(`📊 Found ${adCount} ads near domain mentions`)
+      console.log(`📊 Domain verified - sponsored: ${sponsoredCount}, containers: ${containerCount}, labels: ${adLabelCount}`)
+      
+      // Use the higher of container count or 50% of sponsored count
+      const estimatedCount = Math.max(containerCount, Math.floor(sponsoredCount * 0.5))
+      adCount = Math.min(estimatedCount, 75) // Cap at 75 for domain-verified
+      
+      console.log(`✅ Using domain-based count: ${adCount}`)
+      
+    } else if (companyNameAppears) {
+      console.log(`👤 Using company name verification`)
+      verificationLevel = 'name'
+      
+      // Conservative counting for name-only verification
+      const sponsoredCount = (htmlContent.match(/sponsored/gi) || []).length
+      const containerCount = (htmlContent.match(/data-testid="serp-item"/gi) || []).length
+      
+      console.log(`📊 Name only - sponsored: ${sponsoredCount}, containers: ${containerCount}`)
+      
+      // Use 30% of sponsored count or container count, whichever is lower
+      const estimatedCount = Math.min(
+        Math.floor(sponsoredCount * 0.3),
+        containerCount
+      )
+      adCount = Math.min(estimatedCount, 25) // Cap at 25 for name-only
+      
+      console.log(`✅ Using name-based count: ${adCount}`)
       
     } else {
-      console.log(`📊 Using general counting (less reliable)`)
+      console.log(`⚠️  No verification - using minimal counting`)
+      verificationLevel = 'none'
       
-      // General counting but with stricter limits
-      const totalSponsored = (htmlContent.match(/sponsored/gi) || []).length
-      const totalAdLabels = (htmlContent.match(/>\s*Ad\s*</gi) || []).length
+      // Very conservative for unverified
+      const containerCount = (htmlContent.match(/data-testid="serp-item"/gi) || []).length
+      adCount = Math.min(Math.floor(containerCount * 0.2), 10) // 20% of containers, max 10
       
-      // Use a fraction of total count since we can't verify the company
-      adCount = Math.min(Math.max(totalSponsored, totalAdLabels) * 0.1, 15)
-      adCount = Math.floor(adCount)
+      console.log(`⚠️  Unverified count: ${adCount}`)
+    }
+    
+    // Additional validation: if count seems too low for a verified company, use fallback
+    if ((socialHandleVerified || domainAppears) && adCount < 3) {
+      const fallbackCount = Math.min(
+        (htmlContent.match(/sponsored/gi) || []).length,
+        15
+      )
       
-      console.log(`📊 General count (10% of ${Math.max(totalSponsored, totalAdLabels)}): ${adCount}`)
+      if (fallbackCount >= 3) {
+        console.log(`🔄 Count too low (${adCount}), using fallback: ${fallbackCount}`)
+        adCount = fallbackCount
+      }
     }
 
-    console.log(`📈 Final ad count: ${adCount}`)
+    console.log(`📈 Final ad count: ${adCount} (verification: ${verificationLevel})`)
 
     // Results with improved verification
     if (adCount === 0) {
@@ -285,20 +338,24 @@ async function scrapeFacebookAdsWithScrapingBee(
     const newAdsRatio = dateRange <= 7 ? 0.15 : dateRange <= 30 ? 0.25 : 0.4
     const estimatedNewAds = Math.ceil(adCount * newAdsRatio)
 
-    // Verification status message
+ // Success case with enhanced verification status
+    const newAdsRatio = dateRange <= 7 ? 0.15 : dateRange <= 30 ? 0.25 : 0.4
+    const estimatedNewAds = Math.ceil(adCount * newAdsRatio)
+
+    // Enhanced verification status message
     let verificationMessage = null
     if (socialHandleVerified) {
-      verificationMessage = `✅ Verified with social handle @${matchedHandle}`
+      verificationMessage = `✅ Verified with social handle @${matchedHandle} (${verificationLevel} verification)`
     } else if (domainAppears) {
-      verificationMessage = `✅ Verified with website domain ${websiteDomain}`
+      verificationMessage = `✅ Verified with website domain ${websiteDomain} (${verificationLevel} verification)`
     } else if (companyNameAppears) {
-      verificationMessage = `⚠️  Verified by company name only - results may include similar companies`
+      verificationMessage = `⚠️  Verified by company name only - may include similar companies (${verificationLevel} verification)`
     } else {
-      verificationMessage = `⚠️  Low verification confidence - please review results carefully`
+      verificationMessage = `⚠️  Low verification confidence - results uncertain (${verificationLevel} verification)`
     }
 
     console.log(`✅ SUCCESS: "${companyName}" - ${adCount} active ads, ${estimatedNewAds} new ads`)
-    console.log(verificationMessage)
+    console.log(`📊 Verification: ${verificationMessage}`)
 
     return {
       found: true,
