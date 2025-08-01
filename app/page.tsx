@@ -22,7 +22,7 @@ interface AnalysisResults {
 
 export default function HomePage() {
   const [openaiApiKey, setOpenaiApiKey] = useState('')
-  const [browserlessApiKey, setBrowserlessApiKey] = useState('')
+  const [scrapingBeeApiKey, setScrapingBeeApiKey] = useState('')
   const [companies, setCompanies] = useState([
     { companyName: '', websiteUrl: '' },
     { companyName: '', websiteUrl: '' },
@@ -44,8 +44,8 @@ export default function HomePage() {
       return
     }
 
-    if (!browserlessApiKey.trim()) {
-      alert('Please enter your Browserless.io API key')
+    if (!scrapingBeeApiKey.trim()) {
+      alert('Please enter your ScrapingBee API key')
       return
     }
 
@@ -65,7 +65,7 @@ export default function HomePage() {
         },
         body: JSON.stringify({
           openaiApiKey,
-          browserlessApiKey,
+          scrapingBeeApiKey,
           companies: filledCompanies,
           dateRange
         })
@@ -118,7 +118,7 @@ export default function HomePage() {
             Facebook Ads Library Analyzer
           </h1>
           <p className="text-gray-600">
-            Real-time Facebook Ads analysis using web scraping technology
+            Real-time Facebook Ads analysis using advanced web scraping
           </p>
         </div>
 
@@ -146,34 +146,42 @@ export default function HomePage() {
               </p>
             </div>
             
-           <div>
-  <label className="block text-sm font-medium text-gray-700 mb-2">
-    ScrapingBee API Key
-  </label>
-  <input
-    type="password"
-    className="input-field"
-    placeholder="Enter your ScrapingBee API key"
-    value={browserlessApiKey}
-    onChange={(e) => setBrowserlessApiKey(e.target.value)}
-  />
-  <p className="text-xs text-gray-500 mt-1">
-    Used for web scraping Facebook Ads Library
-  </p>
-</div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                ScrapingBee API Key
+              </label>
+              <input
+                type="password"
+                className="input-field"
+                placeholder="Enter your ScrapingBee API key"
+                value={scrapingBeeApiKey}
+                onChange={(e) => setScrapingBeeApiKey(e.target.value)}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Used for web scraping Facebook Ads Library
+              </p>
+            </div>
+          </div>
           
-         <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-  <p className="text-sm text-blue-700">
-    <strong>Need API keys?</strong>
-    <br />
-    • OpenAI: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline">platform.openai.com/api-keys</a>
-    <br />
-    • ScrapingBee: <a href="https://app.scrapingbee.com/account/register" target="_blank" rel="noopener noreferrer" className="underline">app.scrapingbee.com/account/register</a> (1000 requests/month free)
-    <br />
-    <br />
-    <strong>Note:</strong> ScrapingBee has a more generous free tier than Browserless.io
-  </p>
-</div>
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-700">
+              <strong>Need API keys?</strong>
+              <br />
+              • OpenAI: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline">platform.openai.com/api-keys</a>
+              <br />
+              • ScrapingBee: <a href="https://app.scrapingbee.com/account/register" target="_blank" rel="noopener noreferrer" className="underline">app.scrapingbee.com/account/register</a> (1000 requests/month free)
+              <br />
+              <br />
+              <strong>ScrapingBee Benefits:</strong>
+              <br />
+              ✅ 1000 free API calls/month
+              <br />
+              ✅ JavaScript rendering for complex sites
+              <br />
+              ✅ Premium proxies included on free plan
+            </p>
+          </div>
+        </div>
 
         {/* Company Inputs */}
         <div className="mb-8">
@@ -245,7 +253,7 @@ export default function HomePage() {
           </button>
           {isAnalyzing && (
             <p className="text-sm text-gray-600 mt-2">
-              This may take 30-60 seconds per company...
+              Scraping Facebook Ads Library... This may take 1-2 minutes per company.
             </p>
           )}
         </div>
