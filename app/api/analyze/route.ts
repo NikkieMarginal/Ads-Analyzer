@@ -52,7 +52,7 @@ async function scrapeFacebookAdsWithBrowserless(
         headers: {
           'Content-Type': 'application/json'
         },
-        timeout: 30000
+        timeout: 45000
       }
     )
 
@@ -153,23 +153,19 @@ async function scrapeFacebookAdsWithBrowserless(
 
 export async function POST(request: NextRequest) {
   try {
-    const { apiKey, companies, dateRange } = await request.json()
+    const { openaiApiKey, browserlessApiKey, companies, dateRange } = await request.json()
     console.log('API called with:', { companiesCount: companies.length, dateRange })
 
-    if (!apiKey) {
+    if (!openaiApiKey) {
       return NextResponse.json({ error: 'OpenAI API key is required' }, { status: 400 })
     }
 
-    // Get Browserless API key from environment variables
-    const browserlessApiKey = process.env.BROWSERLESS_API_KEY
     if (!browserlessApiKey) {
-      return NextResponse.json({ 
-        error: 'Browserless API key not configured. Please add BROWSERLESS_API_KEY to environment variables.' 
-      }, { status: 500 })
+      return NextResponse.json({ error: 'Browserless API key is required' }, { status: 400 })
     }
 
     const openai = new OpenAI({
-      apiKey: apiKey,
+      apiKey: openaiApiKey,
     })
 
     const results: CompanyResult[] = []
