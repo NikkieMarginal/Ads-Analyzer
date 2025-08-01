@@ -146,33 +146,34 @@ export default function HomePage() {
               </p>
             </div>
             
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Browserless.io API Key
-              </label>
-              <input
-                type="password"
-                className="input-field"
-                placeholder="Enter your Browserless API key"
-                value={browserlessApiKey}
-                onChange={(e) => setBrowserlessApiKey(e.target.value)}
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Used for web scraping Facebook Ads Library
-              </p>
-            </div>
-          </div>
+           <div>
+  <label className="block text-sm font-medium text-gray-700 mb-2">
+    ScrapingBee API Key
+  </label>
+  <input
+    type="password"
+    className="input-field"
+    placeholder="Enter your ScrapingBee API key"
+    value={browserlessApiKey}
+    onChange={(e) => setBrowserlessApiKey(e.target.value)}
+  />
+  <p className="text-xs text-gray-500 mt-1">
+    Used for web scraping Facebook Ads Library
+  </p>
+</div>
           
-          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-            <p className="text-sm text-blue-700">
-              <strong>Need API keys?</strong>
-              <br />
-              • OpenAI: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline">platform.openai.com/api-keys</a>
-              <br />
-              • Browserless.io: <a href="https://www.browserless.io" target="_blank" rel="noopener noreferrer" className="underline">browserless.io</a> (free tier available)
-            </p>
-          </div>
-        </div>
+         <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+  <p className="text-sm text-blue-700">
+    <strong>Need API keys?</strong>
+    <br />
+    • OpenAI: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="underline">platform.openai.com/api-keys</a>
+    <br />
+    • ScrapingBee: <a href="https://app.scrapingbee.com/account/register" target="_blank" rel="noopener noreferrer" className="underline">app.scrapingbee.com/account/register</a> (1000 requests/month free)
+    <br />
+    <br />
+    <strong>Note:</strong> ScrapingBee has a more generous free tier than Browserless.io
+  </p>
+</div>
 
         {/* Company Inputs */}
         <div className="mb-8">
